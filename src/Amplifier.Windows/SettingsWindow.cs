@@ -23,6 +23,8 @@ internal sealed class SettingsWindow : Window
     private readonly List<AvatarVisual> previews = new();
     private CancellationTokenSource? pairing;
     private bool closed;
+    private readonly Dictionary<NoticeVisibility, RadioButton> noticeModes = new();
+    private bool updatingPreferences;
     public SettingsWindow(ClientController owner)
     {
         this.owner = owner;Title = owner.Preview ? "Amplifier Preview Settings · synthetic activity" : "Amplifier Settings";Width = 720;Height = 610;MinWidth = 640;MinHeight = 500;WindowStartupLocation = WindowStartupLocation.CenterScreen;
@@ -59,11 +61,15 @@ internal sealed class SettingsWindow : Window
         var visibility = new StackPanel { Orientation = Orientation.Horizontal };
         foreach (var mode in Enum.GetValues<NoticeVisibility>())
         {
-            var radio = new RadioButton { Content = mode == NoticeVisibility.Hover ? "On hover" : mode.ToString(), GroupName = "notices", IsChecked = owner.Preferences.Visibility == mode, Margin = new Thickness(0, 0, 24, 20) };
-            radio.Checked += (_, _) => { owner.Preferences.Visibility = mode;owner.PreferencesChanged(); };visibility.Children.Add(radio);
+            var radio = new RadioButton { Content = NoticeSizes.Label(mode), GroupName = "notices", IsChecked = owner.Preferences.Visibility == mode, Margin = new Thickness(0, 0, 24, 20) };
+            radio.Checked += (_, _) => { if (updatingPreferences) return;owner.Preferences.Visibility = mode;owner.PreferencesChanged(); };noticeModes[mode] = radio;visibility.Children.Add(radio);
         }
         tempo.Children.Add(visibility);
         tempo.Children.Add(new TextBlock { Text = "Hover over the avatar or notices to reveal the saved collapsed or expanded list.", TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 24) });
+        var sizes = new ComboBox { ItemsSource = Enum.GetValues<NoticeSize>(), SelectedItem = owner.Preferences.NoticeSize, Width = 180, HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 0, 0, 16) };
+        AutomationProperties.SetName(sizes, "Notification size");
+        sizes.SelectionChanged += (_, _) => { if (sizes.SelectedItem is NoticeSize size) { owner.Preferences.NoticeSize = size;owner.PreferencesChanged(); } };
+        tempo.Children.Add(new Label { Content = "Notification size", Target = sizes });tempo.Children.Add(sizes);
         Toggle(tempo, "Include ongoing work", owner.Preferences.IncludeWorking, v => owner.Preferences.IncludeWorking = v);
         Toggle(tempo, "Group notices by service", owner.Preferences.GroupByService, v => owner.Preferences.GroupByService = v);
         Toggle(tempo, "Show service headings when grouped", owner.Preferences.ServiceHeadings, v => owner.Preferences.ServiceHeadings = v);
@@ -87,13 +93,19 @@ internal sealed class SettingsWindow : Window
 
         var about = new TextBlock { Margin = new Thickness(22), TextWrapping = TextWrapping.Wrap, Text = "Amplifier for Windows · development preview\n\nThis native client observes and replies to host-owned chats. It does not install a server or grant browser/desktop control.\n\nWindows notification activation, signed installation, update delivery, accessibility and real-device acceptance are release gates still under development." };
         tabs.Items.Add(new TabItem { Header = "About", Content = about });
-        owner.Changed += UpdateServices;Closed += (_, _) => { closed = true;pairing?.Cancel();owner.Changed -= UpdateServices;foreach (var art in previews) art.Dispose(); };
+        owner.Changed += UpdateNoticeModes;owner.Changed += UpdateServices;Closed += (_, _) => { closed = true;pairing?.Cancel();owner.Changed -= UpdateNoticeModes;owner.Changed -= UpdateServices;foreach (var art in previews) art.Dispose(); };
         LoadPreviews();UpdateServices();if (owner.Preferences.Services.Count == 0) tabs.SelectedIndex = 2;
     }
     private void Toggle(Panel panel, string label, bool initial, Action<bool> update)
     {
         var control = new CheckBox { Content = label, IsChecked = initial, Margin = new Thickness(0, 0, 0, 18) };
         control.Click += (_, _) => { update(control.IsChecked == true);owner.PreferencesChanged(); };panel.Children.Add(control);
+    }
+    private void UpdateNoticeModes()
+    {
+        updatingPreferences = true;
+        foreach (var (mode, control) in noticeModes) control.IsChecked = owner.Preferences.Visibility == mode;
+        updatingPreferences = false;
     }
     private void AppearanceChanged() { owner.PreferencesChanged();LoadPreviews(); }
     private void LoadPreviews() { foreach (var art in previews) { art.Load((string)art.Tag, owner.Preferences.Finish, owner.Preferences.Palette);art.Show(AvatarState.Offline, 0); } }

@@ -12,6 +12,7 @@ public sealed class Preferences
     public string Finish { get; set; } = "clear";
     public string Palette { get; set; } = "blue";
     public NoticeVisibility Visibility { get; set; } = NoticeVisibility.Visible;
+    public NoticeSize NoticeSize { get; set; } = NoticeSize.Compact;
     public bool HideTempo { get; set; }
     public bool Expanded { get; set; }
     public bool IncludeWorking { get; set; } = true;

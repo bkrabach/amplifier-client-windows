@@ -92,6 +92,59 @@ await Check("global versus service grouping and plain summary", () => {
     Assert(Presentation.Sort(rows,["a","b"],true)[0].Key=="a");
     Assert(Presentation.Plain("**Done**: [sample](https://example.test)\n`code`")=="Done: sample code");return Task.CompletedTask;
 });
+await Check("Mac parity: stable host ties, pinned inactive notices, one row per working chat", () => {
+    var service = registration;
+    var working = new Session("active", "Active", "working", false, false, new(true,false,false));
+    Notice N(string id, string chat, string kind, bool agent=false, bool pinned=false) => new(id,"f",kind,new("session",chat),kind=="session-error",false,id,"Summary",agent,pinned);
+    var observation = new Observation("h","i",[working],[
+        N("Zulu", "inactive", "completion",true,true), N("Alpha", "other", "completion"),
+        N("Error", "failed", "session-error"), N("Active", "active", "completion")], new(1,0,0,4,1));
+    var rows = Presentation.Sort(Presentation.Rows(service,observation,true),[service.Id],false);
+    Assert(rows.Count==4 && rows[0].Title=="Error" && rows[1].Title=="Zulu" && rows[2].Title=="Alpha");
+    Assert(rows.Count(x=>x.SessionId=="active")==1 && rows.Last().State==AvatarState.Working && rows.Last().Attention);
+    Assert(rows.Last().Detail=="Unread · Thinking…");return Task.CompletedTask;
+});
+await Check("notice size defaults to compact and never exceeds original size", () => {
+    var preferences=JsonSerializer.Deserialize<Preferences>("{}",Json.Options)!;
+    Assert(preferences.NoticeSize==NoticeSize.Compact);
+    Assert(NoticeSizes.Scale(NoticeSize.Compact)<NoticeSizes.Scale(NoticeSize.Comfortable));
+    Assert(NoticeSizes.Scale(NoticeSize.Comfortable)<NoticeSizes.Scale(NoticeSize.Large));
+    Assert(NoticeSizes.Scale(NoticeSize.Large)==1);return Task.CompletedTask;
+});
+await Check("PWA launch is exact-origin and preserves the chat argument without shell parsing", async () => {
+    var app=new InstalledWebApp("https://example.test/",new string('a',32),"Profile 2");
+    Assert(app.Accepts(endpoint.Chat("a&b")));
+    Assert(app.Arguments(endpoint.Chat("a&b")).Last()=="--app-launch-url-for-shortcuts-menu-item=https://example.test/?chat=a%26b");
+    foreach(var target in new[]{"https://other.test/","https://example.test:444/","http://example.test/","https://user@example.test/"})
+        await Reject(()=>Task.FromResult(app.Arguments(new Uri(target))));
+    Assert(!(app with { Profile="../profile" }).Accepts(endpoint.Origin));
+    Assert(!(app with { AppId="--bad" }).Accepts(endpoint.Origin));
+});
+await Check("display details never use raw tool input or an answer before the latest user", () => {
+    JsonElement Parse(string json)=>JsonDocument.Parse(json).RootElement;
+    Assert(NoticeDetails.Response(Parse("""[{"role":"assistant","text":"old"},{"role":"user","text":"new"}]"""))==null);
+    Assert(NoticeDetails.Response(Parse("""[{"role":"assistant","text":"**Ready**"}]"""))=="Ready");
+    var work=NoticeDetails.Work(Parse("""[{"id":"a","kind":"tool","tool":"app_control","label":"app_control","phase":"running","actionPath":"dispatch → browser.click","input":{"password":"NEVER SHOW"}},{"id":"b","kind":"llm","phase":"running"}]"""));
+    Assert(work?.Text=="App · browser click" && work?.State=="a|tool|running");return Task.CompletedTask;
+});
+await Check("response preview waits for a matching complete observation and discards stale work", async () => {
+    var notice=new Notice("n","f","completion",new("session","chat"),false,false,"Chat","Response ready",false,false);
+    var observation=new Observation("h","i",[],[notice],new(0,0,0,1,0));
+    var row=Presentation.Rows(registration,observation,true).Single();var details=new NoticeDetails();
+    using var transport=Queue("""{"items":[{"role":"assistant","text":"New answer"}]}""");
+    details.Reconcile(observation);await details.FetchAsync(transport,observation,[row],default);
+    Assert(details.Enrich(row,observation).Detail=="Response ready");
+    details.Reconcile(observation);Assert(details.Enrich(row,observation).Detail=="New answer");
+    var active=observation with { Sessions=[new Session("chat","Chat","working",false,false,new(true,false,false))] };
+    details.Reconcile(active);Assert(details.Enrich(row,active).Detail=="Response ready");
+});
+await Check("working dismissal survives missing detail but clears for a new action", () => {
+    var row=new NoticeRow("k","s","h","c","Chat","Thinking…","work|working|",AvatarState.Working,"Service") { Attention=false };
+    var saved=new Dictionary<string,string>{{"k",row.Fingerprint}};
+    Assert(Presentation.Dismissed(row with { Fingerprint="work|working|action-a" },saved));
+    Assert(Presentation.Dismissed(row,saved));
+    Assert(!Presentation.Dismissed(row with { Fingerprint="work|working|action-b" },saved));return Task.CompletedTask;
+});
 await Check("agent-created work is opt-in through pinning", () => {
     var hidden=new Session("a","A","working",false,true,new(true,false,false));
     var observation=new Observation("h","i",[hidden],[],new(1,0,0,0,0));
