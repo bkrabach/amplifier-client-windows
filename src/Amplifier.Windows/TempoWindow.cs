@@ -14,7 +14,7 @@ namespace Amplifier.Windows;
 internal sealed class TempoWindow : Window, IDisposable
 {
     private readonly ClientController owner;
-    private readonly AvatarVisual avatar = new() { Width = 150, Height = 150 };
+    private readonly AvatarVisual avatar = new() { Width = 90, Height = 90 };
     private readonly AvatarPlayback playback = new();
     private readonly HoverPresentation hover = new();
     private readonly Stopwatch clock = Stopwatch.StartNew();
@@ -25,11 +25,16 @@ internal sealed class TempoWindow : Window, IDisposable
     private Point startPosition;
     public TempoWindow(ClientController owner)
     {
-        this.owner = owner;Width = 164;Height = 184;WindowStyle = WindowStyle.None;AllowsTransparency = true;
+        this.owner = owner;Title = owner.Preview ? "Amplifier Tempo Preview" : "Amplifier Tempo";Width = 100;Height = 111;WindowStyle = WindowStyle.None;AllowsTransparency = true;
         Background = Brushes.Transparent;ShowInTaskbar = false;ShowActivated = false;Topmost = true;ResizeMode = ResizeMode.NoResize;
         var stack = new StackPanel { HorizontalAlignment = HorizontalAlignment.Center };
         stack.Children.Add(avatar);
-        pill = new Button { Width = 56, Height = 17, Margin = new Thickness(0, 4, 0, 0), Padding = new Thickness(0), BorderThickness = new Thickness(0) };
+        var pillBorder = new FrameworkElementFactory(typeof(Border));
+        pillBorder.SetValue(Border.CornerRadiusProperty, new CornerRadius(5));
+        pillBorder.SetValue(Border.BackgroundProperty, new TemplateBindingExtension(Control.BackgroundProperty));
+        pill = new Button { Width = 34, Height = 10, HorizontalAlignment = HorizontalAlignment.Center,
+            Margin = new Thickness(0, 2.4, 0, 0), Padding = new Thickness(0), BorderThickness = new Thickness(0),
+            Template = new ControlTemplate(typeof(Button)) { VisualTree = pillBorder } };
         pill.Click += (_, _) => { hover.Toggle();owner.Preferences.Visibility = hover.Mode;owner.PreferencesChanged(); };stack.Children.Add(pill);Content = stack;
         notices = new NoticeWindow(owner, this);
         SourceInitialized += (_, _) => Native.Passive(this);
@@ -80,9 +85,13 @@ internal sealed class TempoWindow : Window, IDisposable
     {
         if (!IsVisible) return;
         var presentation = playback.Presentation(clock.Elapsed.TotalSeconds);avatar.Show(presentation.State, presentation.Elapsed);
-        var pointer = Native.Cursor(this);
-        var inside = new Rect(Left, Top, Width, Height).Contains(pointer) || (notices.IsVisible && new Rect(notices.Left, notices.Top, notices.Width, notices.Height).Contains(pointer));
-        hover.Update(inside, dragStart != null || notices.Resizing, clock.Elapsed);
+        if (hover.Mode == NoticeVisibility.Hover)
+        {
+            var pointer = Native.Cursor(this);
+            var inside = new Rect(Left, Top, Width, Height).Contains(pointer) || (notices.IsVisible && new Rect(notices.Left, notices.Top, notices.Width, notices.Height).Contains(pointer));
+            hover.Update(inside, dragStart != null || notices.Resizing, clock.Elapsed);
+        }
+        else hover.Update(false, false, clock.Elapsed);
         if (hover.Visible && owner.Rows.Count > 0 && Top - Native.WorkArea(this).Top >= 38) { LayoutNotices();if (!notices.IsVisible) notices.Show(); }
         else notices.Hide();
     }
