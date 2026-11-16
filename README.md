@@ -23,7 +23,7 @@ organization teams are not configured in this personal repository**.
 - [Product vision](docs/VISION.md)
 - [Windows contract](contracts/windows-client.v1.md)
 - [Architecture and ownership](docs/architecture.md)
-- [Development and qualification](CONTRIBUTING.md)
+- [Development](CONTRIBUTING.md) and [build/qualification](docs/qualification.md)
 - [Repository audit and transfer checklist](docs/repository-audit.md)
 
 No server installation, service restart, browser-profile access, or native task

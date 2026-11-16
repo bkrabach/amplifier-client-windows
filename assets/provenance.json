@@ -1,0 +1,109 @@
+{
+  "repository": "https://github.com/microsoft/amplifier-client-macos",
+  "revision": "e43da6cefd2ca8142ce57f51784821b6a8cbfcf8",
+  "sourceDirectory": "Sources/AmplifierApp/Resources",
+  "assets": [
+    {
+      "file": "ARTWORK.md",
+      "sha256": "126cd14b48fad39060d09dfb9a0cbbec0620f5da526553806fc1cef887913c37"
+    },
+    {
+      "file": "MenuBarIcon.png",
+      "sha256": "0d55d67e6da950afce3a67ffd2ec7ddd2eb525056bee999eb561f0ffc1721d4c"
+    },
+    {
+      "file": "MenuBarIcon@2x.png",
+      "sha256": "a7c88f5e65173af8cbb26068c4fd87a4f2919ea31869eb1a78b9f11a66b6eb99"
+    },
+    {
+      "file": "accord-dark-working.png",
+      "sha256": "709da2d5cdb2fc6807bdad4bd0a564615465d4a66f9a86144e1c97bebf462590"
+    },
+    {
+      "file": "accord-dark.png",
+      "sha256": "7abb37b887b080b4bf40ec7456f187992c45c54e756fcaf708123d39fe4cd69e"
+    },
+    {
+      "file": "accord-working.png",
+      "sha256": "a2e132fc1fca0c8d08cd416f0c4e8a292ab998707d63f2dbe1443ae09ac6f88d"
+    },
+    {
+      "file": "accord.png",
+      "sha256": "a0c8601f764f93703efe3a8f55ca8fd657565ab6cd97e4101ef1e8304d85ae57"
+    },
+    {
+      "file": "clippy-dark-working.png",
+      "sha256": "ac7d481f7763902e5e0d6dfb900d3202c039a16038e4387323b3a6c84fc2464b"
+    },
+    {
+      "file": "clippy-dark.png",
+      "sha256": "03bf5dcc3cb83d742f1f176c92698073f7905ae004a9cb3a4ca8179df24c334e"
+    },
+    {
+      "file": "clippy-working.png",
+      "sha256": "6d8b6683e06731d62e7db1cfd1a60bee2190b81a35c03155bf4f98a72b6d717a"
+    },
+    {
+      "file": "clippy.png",
+      "sha256": "0bccdb482995112f459085141dd81908671f65e89b8ae5e6fbf9fd131d3b40fb"
+    },
+    {
+      "file": "crest-dark-working.png",
+      "sha256": "fa407b92aca6a0f3d26d689deae5b939116c99065d1923c24fe3b706fd1b748e"
+    },
+    {
+      "file": "crest-dark.png",
+      "sha256": "af0359ea4d094710711590b2a4dc81499b8240cfc754c0cf9f5328140e6a5463"
+    },
+    {
+      "file": "crest-working.png",
+      "sha256": "86df42afc9a733b8048e39606dcbef49ce661c8c0e0b0e640fdaf3d14ae6d42d"
+    },
+    {
+      "file": "crest.png",
+      "sha256": "ee58fc4e33847bff941c01d4d5fe3344401c7e33c73c5e4dde6881bad2d6aaa2"
+    },
+    {
+      "file": "d20-dark-working.png",
+      "sha256": "56ab9bd7b3166bdca5bf6b431605f9c2493a479ef3d6029cc67914e2ce311ae7"
+    },
+    {
+      "file": "d20-dark.png",
+      "sha256": "18a3e85f8b336d09a2ecef0a9cf3221faeb885d7cd20ff8d509976e09b243f32"
+    },
+    {
+      "file": "d20-working.png",
+      "sha256": "33baeb2aff29815597814bacc6da30d495e2504d63519ae7e258dacef384722d"
+    },
+    {
+      "file": "d20.png",
+      "sha256": "f1f38030ac59bc1d771c984288f4dbb604b78244c54a941e8a7bb68facd940d0"
+    },
+    {
+      "file": "meter-dark.png",
+      "sha256": "4771c0645d9957c1f4fb2c182c2945e1feb0082a3f2c79e8fa7c98c122a5387b"
+    },
+    {
+      "file": "meter.png",
+      "sha256": "bafcfda118b1e3fb1a8ccbbbfc408492e65a445a0fee8d594d5cf4154354bfb6"
+    },
+    {
+      "file": "relay-dark.png",
+      "sha256": "5129820c7e5bb3d71e231d6dbe07362976b708f54a7c1338a1d128d1474ff095"
+    },
+    {
+      "file": "relay.png",
+      "sha256": "613f0a1373c31e2a9b020a21aaabbd740c3036e1e5077e0a30855fdfad51ffcc"
+    },
+    {
+      "file": "GENERATED-ARTWORK.json",
+      "sha256": "9015fce33dad98dca5a3677cebd38aa8481e2af3eb7283faaed1999c7e8f42b1"
+    }
+  ],
+  "applicationIcon": {
+    "repository": "https://github.com/microsoft/amplifier-unified",
+    "revision": "559d388ae4cefbedc048b8af54c72b94216b4e18",
+    "path": "assets/branding/icons/amplifier-windows.ico",
+    "sha256": "5911ff969fd87831109e3039f16c708dc6976bce4e1741f1d1997ca95c0b0234"
+  }
+}
