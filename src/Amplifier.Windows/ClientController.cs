@@ -18,6 +18,7 @@ internal sealed class ServiceRuntime(Registration registration, HostTransport tr
     public HostTransport Transport { get; } = transport;
     public CancellationTokenSource Cancellation { get; } = new();
     public Observation? Observation;
+    public NoticeDetails Details { get; } = new();
     public string Status = "Connecting…";
     public bool Sending;
     public void Dispose() { Cancellation.Cancel();Transport.Dispose();Cancellation.Dispose(); }
@@ -33,13 +34,14 @@ internal sealed class ClientController : IDisposable
     private readonly Dictionary<string, ServiceRuntime> services = new();
     private readonly Forms.NotifyIcon tray;
     private readonly TempoWindow tempo;
+    private readonly WebAppOpener webApp = new();
     private SettingsWindow? settings;
     private bool disposed;
     public event Action? Changed;
     public IReadOnlyList<NoticeRow> Rows { get; private set; } = [];
     public IReadOnlyList<NoticeRow> AllRows { get; private set; } = [];
     public IReadOnlyList<ServiceRuntime> Services => Preferences.Services.Select(x => services.GetValueOrDefault(x.Id)).Where(x => x != null).Cast<ServiceRuntime>().ToArray();
-    public int Attention => AllRows.Count(x => x.State != AvatarState.Working);
+    public int Attention => AllRows.Count(x => x.Attention);
     public int Working => Services.Where(x => x.Observation != null).Sum(x => x.Observation!.Sessions.Count(s => (s.Execution || s.Preparing) && (s.AgentCreated != true || s.Pinned)));
     public bool Connected => Services.Any(x => x.Observation != null);
     public bool Connecting => Services.Any(x => x.Status == "Connecting…");
@@ -87,17 +89,22 @@ internal sealed class ClientController : IDisposable
         try { Process.Start(new ProcessStartInfo(url.AbsoluteUri) { UseShellExecute = true }); }
         catch { MessageBox.Show("Windows could not open the browser. Your chat has not been marked read.", "Amplifier"); }
     }
+    private async void OpenWorkspace(Uri url)
+    {
+        try { if (!await webApp.OpenAsync(url)) Open(url); }
+        catch { MessageBox.Show("Windows could not open the installed Amplifier web app. Your chat has not been marked read.", "Amplifier"); }
+    }
     public void OpenDefault()
     {
         if (Preview) { OpenSettings();return; }
         var selected = Preferences.Services.FirstOrDefault(x => x.Id == Preferences.PreferredId) ?? Preferences.Services.FirstOrDefault();
-        if (selected == null) OpenSettings();else Open(new Endpoint(selected.Address).Origin);
+        if (selected == null) OpenSettings();else OpenWorkspace(new Endpoint(selected.Address).Origin);
     }
     public void OpenChat(NoticeRow row)
     {
         if (Preview) { OpenSettings();return; }
         var service = Preferences.Services.FirstOrDefault(x => x.Id == row.RegistrationId && x.HostIdentity == row.HostIdentity);
-        if (service != null) Open(new Endpoint(service.Address).Chat(row.SessionId));
+        if (service != null) OpenWorkspace(new Endpoint(service.Address).Chat(row.SessionId));
     }
     public void Dismiss(NoticeRow row)
     {
@@ -168,7 +175,7 @@ internal sealed class ClientController : IDisposable
                 await observer.AttachAsync(runtime.Registration.HostIdentity, token);
                 var snapshot = await observer.PollAsync(token);
                 if (!services.TryGetValue(runtime.Registration.Id, out var current) || current != runtime) return;
-                runtime.Observation = snapshot;runtime.Status = "Connected";delay = Preferences.HideTempo ? 15 : 5;
+                runtime.Details.Reconcile(snapshot);runtime.Observation = snapshot;runtime.Status = "Connected";delay = Preferences.HideTempo ? 15 : 5;
             }
             catch (OperationCanceledException) when (token.IsCancellationRequested) { return; }
             catch (HostException error) when (error.AuthenticationLost)
@@ -182,6 +189,13 @@ internal sealed class ClientController : IDisposable
             }
             if (disposed || token.IsCancellationRequested) return;
             Refresh();
+            if (tempo.NoticesVisible && runtime.Observation is { } observed)
+            {
+                try { await runtime.Details.FetchAsync(runtime.Transport, observed, Rows.Where(x => x.RegistrationId == runtime.Registration.Id).ToArray(), token); }
+                catch (Exception) { /* Optional display enrichment never changes connection authority or membership. */ }
+                if (disposed || token.IsCancellationRequested) return;
+                Refresh();
+            }
             try { await Task.Delay(TimeSpan.FromSeconds(delay + Random.Shared.NextDouble()), token); }
             catch (OperationCanceledException) { return; }
         }
@@ -189,8 +203,8 @@ internal sealed class ClientController : IDisposable
     private void Refresh()
     {
         if (disposed) return;
-        AllRows = Services.Where(x => x.Observation != null).SelectMany(x => Presentation.Rows(x.Registration, x.Observation!, Preferences.IncludeWorking)).ToArray();
-        Rows = Presentation.Sort(AllRows.Where(x => Preferences.Dismissed.GetValueOrDefault(x.Key) != x.Fingerprint), Preferences.Services.Select(x => x.Id).ToArray(), Preferences.GroupByService);
+        AllRows = Services.Where(x => x.Observation != null).SelectMany(x => Presentation.Rows(x.Registration, x.Observation!, Preferences.IncludeWorking).Select(row => x.Details.Enrich(row, x.Observation!))).ToArray();
+        Rows = Presentation.Sort(AllRows.Where(x => !Presentation.Dismissed(x, Preferences.Dismissed)), Preferences.Services.Select(x => x.Id).ToArray(), Preferences.GroupByService);
         var menu = new Forms.ContextMenuStrip();
         menu.Items.Add(Connected ? Attention + " updates · " + Working + " working" : "No services connected").Enabled = false;
         menu.Items.Add("Open Amplifier", null, (_, _) => OpenDefault());

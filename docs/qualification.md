@@ -59,3 +59,19 @@ contains a browser/desktop task executor or host credentials in navigation.
 A successful native off-screen test does not qualify user focus, accessibility,
 notifications, pairing, browser reuse or signed installation. ARM64 requires its
 own actual runtime qualification even though a publish target is available.
+
+## Notification parity follow-up
+
+Core checks cover stable Mac-compatible attention tiers, pinned notices outside
+active sessions, unread/working deduplication, size defaults, bounded preview
+revalidation, raw-tool exclusion, and exact-origin PWA launch arguments. Native
+R13 synthetic-window checks exercise actual wheel delivery through gaps at all
+three sizes, no outside capture, retained row anchor and foreground focus, and
+visibility-mode changes preserving size/expansion. These checks use synthetic
+windows and no service writes. The installed Edge PWA was launched twice through
+the candidate: its window handle and total Edge window count stayed unchanged.
+That establishes warm root-workspace reuse, not a full browser/profile or deep-link
+acceptance matrix. Other origins without an installed PWA retain browser fallback.
+
+The Mac context-menu equivalent is independently qualified and released by its
+canonical repository; no Windows result is represented as Mac acceptance.

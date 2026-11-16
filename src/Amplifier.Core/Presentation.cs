@@ -4,11 +4,20 @@ using System.Text.RegularExpressions;
 namespace Amplifier.Core;
 
 public enum NoticeVisibility { Visible, Hidden, Hover }
+public enum NoticeSize { Compact, Comfortable, Large }
+public static class NoticeSizes
+{
+    public static double Scale(NoticeSize size) => size switch { NoticeSize.Compact => .82, NoticeSize.Comfortable => .91, _ => 1 };
+    public static string Label(NoticeVisibility mode) => mode switch { NoticeVisibility.Visible => "Always visible", NoticeVisibility.Hover => "On hover", _ => "Hidden" };
+}
 public enum AvatarState { Idle, Working, Ready, Review, Error, Connecting, Offline }
 public sealed record NoticeRow(string Key, string RegistrationId, string HostIdentity, string SessionId,
     string Title, string Detail, string Fingerprint, AvatarState State, string ServiceName)
 {
-    public int Priority => State switch { AvatarState.Error => 0, AvatarState.Review => 1, AvatarState.Ready => 2, _ => 3 };
+    // Action-required items share one tier, preserving the host's order within it.
+    public int Priority => State switch { AvatarState.Error or AvatarState.Review => 0, _ => 1 };
+    public bool Attention { get; init; } = true;
+    public int SortPriority => Attention ? Priority : 2;
 }
 
 public static partial class Presentation
@@ -17,9 +26,10 @@ public static partial class Presentation
     public static readonly string[] Palettes = ["blue", "cyan", "amber", "crimson", "green", "purple", "cyan-amber", "purple-blue"];
     public static string Plain(string text)
     {
-        var result = Links().Replace(text, "$1");
+        var result = Links().Replace(text[..Math.Min(text.Length, 8192)], "$1");
         result = Markup().Replace(result, "");
-        return Space().Replace(WebUtility.HtmlDecode(result), " ").Trim();
+        result = Space().Replace(WebUtility.HtmlDecode(result), " ").Trim();
+        return result.Length > 600 ? result[..599] + "…" : result;
     }
     [GeneratedRegex(@"!?\[([^\]]+)\]\([^)]*\)")] private static partial Regex Links();
     [GeneratedRegex(@"(\*\*|__|`{1,3}|(?m:^\s{0,3}#{1,6}\s+))")] private static partial Regex Markup();
@@ -32,27 +42,41 @@ public static partial class Presentation
         foreach (var notice in observation.Notices.Where(n => !n.Read && n.Target.Type == "session"))
         {
             sessions.TryGetValue(notice.Target.SessionId, out var session);
-            if (notice.AgentCreated == true && session?.Pinned != true) continue;
-            var state = notice.Kind == "session-error" ? AvatarState.Error : notice.RequiresAction ? AvatarState.Review : AvatarState.Ready;
+            if (notice.AgentCreated == true && !notice.Pinned && session?.Pinned != true) continue;
+            var state = notice.Kind == "session-error" ? AvatarState.Error : notice.RequiresAction || notice.Kind is not ("completion" or "manual-unread") ? AvatarState.Review :
+                session is { } s && (s.Execution || s.Preparing) ? AvatarState.Working : AvatarState.Ready;
             result.Add(new(service.Id + ":" + observation.HostIdentity + ":" + notice.Id, service.Id,
-                observation.HostIdentity, notice.Target.SessionId, Plain(notice.Title), Plain(notice.Summary),
+                observation.HostIdentity, notice.Target.SessionId, Plain(notice.Title), state == AvatarState.Working ? "Unread · Thinking…" : Plain(notice.Summary),
                 notice.Fingerprint, state, service.Label));
         }
+        var noticed = result.Select(x => x.SessionId).ToHashSet();
         if (includeWorking)
-            foreach (var session in observation.Sessions.Where(s => (s.Execution || s.Preparing) && (s.AgentCreated != true || s.Pinned)))
+            foreach (var session in observation.Sessions.Where(s => !noticed.Contains(s.Id) && (s.Execution || s.Preparing) && (s.AgentCreated != true || s.Pinned)))
                 result.Add(new(service.Id + ":" + observation.HostIdentity + ":work:" + session.Id,
                     service.Id, observation.HostIdentity, session.Id, Plain(session.Title),
-                    session.Preparing && !session.Execution ? "Preparing…" : "Working…",
-                    session.Status + ":" + session.Execution + ":" + session.Preparing, AvatarState.Working, service.Label));
+                    "Thinking…",
+                    "work|" + session.Status + "|", AvatarState.Working, service.Label) { Attention = false });
         return result;
+    }
+
+    public static bool Dismissed(NoticeRow row, IDictionary<string,string> saved)
+    {
+        if (!saved.TryGetValue(row.Key,out var previous)) return false;
+        if (previous == row.Fingerprint) return true;
+        var old = previous.Split('|',3);var current = row.Fingerprint.Split('|',3);
+        if (old.Length == 3 && current.Length == 3 && old[0] == "work" && current[0] == "work" && old[1] == current[1] && (old[2].Length == 0 || current[2].Length == 0))
+        {
+            if(current[2].Length > 0) saved[row.Key] = row.Fingerprint;
+            return true;
+        }
+        return false;
     }
 
     public static IReadOnlyList<NoticeRow> Sort(IEnumerable<NoticeRow> rows, IReadOnlyList<string> serviceOrder, bool grouped)
     {
         var order = serviceOrder.Select((id, index) => (id, index)).ToDictionary(x => x.id, x => x.index);
-        return (grouped ? rows.OrderBy(x => order.GetValueOrDefault(x.RegistrationId, int.MaxValue)).ThenBy(x => x.Priority)
-            : rows.OrderBy(x => x.Priority).ThenBy(x => order.GetValueOrDefault(x.RegistrationId, int.MaxValue)))
-            .ThenBy(x => x.Title, StringComparer.OrdinalIgnoreCase).ThenBy(x => x.Key, StringComparer.Ordinal).ToArray();
+        return (grouped ? rows.OrderBy(x => order.GetValueOrDefault(x.RegistrationId, int.MaxValue)).ThenBy(x => x.SortPriority)
+            : rows.OrderBy(x => x.SortPriority)).ToArray();
     }
 }
 

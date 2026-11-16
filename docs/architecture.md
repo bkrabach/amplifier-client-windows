@@ -36,3 +36,31 @@ The initial public home is bkrabach/amplifier-client-windows, pending the owner'
 Microsoft registration and transfer. Signing identity,
 installer/update channel, real Windows hardware and physical acceptance are explicit
 release prerequisites. Linux compilation is not Windows interaction qualification.
+
+### Notification interaction and navigation correction
+
+Notification sizes are Compact (default), Comfortable and Large (the initial
+pilot size); avatar size is independent. Direct context-menu visibility choices
+share Settings state and preserve expansion and height. Mac's attention tiers
+and stable host ordering are mirrored: action required, other attention, then
+ongoing work. A chat with unread attention and active work occupies one row.
+Pinned notice metadata remains sufficient even outside the active-session page.
+
+A near-transparent viewport hit plane spans gaps and faded edges. While visible,
+a Windows wheel hook handles only vertical wheel events over this exact,
+unobscured window's viewport, returning all other input untouched. It is removed
+when hidden/closed; no input is recorded. The independent header and passive
+focus behavior remain. Refresh restores the visible row's anchor.
+
+Optional bounded conversation detail reads enrich visible notices; membership and
+priority still come solely from observations. Completion text waits for a later
+complete matching fingerprint with no active turn. Tool display uses projected
+labels/hints only, not raw inputs/results. A detail failure cannot broaden scope,
+mark read, replay work or discard the authoritative observation.
+
+Windows installed Edge PWA registrations provide the start origin, app ID and
+profile directory. An unambiguous same-origin registration launches through Edge
+with the same Chromium app/shortcut URL arguments used by the Mac adapter. No
+browser profile database, cookies or credentials are read. Other/ambiguous origins
+retain ordinary browser navigation. Launch-handler support in the web app remains
+necessary for warm in-place navigation; discovery alone does not prove reuse.

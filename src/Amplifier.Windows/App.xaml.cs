@@ -11,7 +11,7 @@ public partial class App : Application
 {
     private Mutex? singleton;
     private ClientController? controller;
-    protected override void OnStartup(StartupEventArgs e)
+    protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
         if (e.Args.Contains("--self-test", StringComparer.Ordinal))
@@ -19,6 +19,19 @@ public partial class App : Application
             var results = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Microsoft", "Amplifier for Windows Preview", "native-checks");
             try { NativeChecks.Run(results);Shutdown(0); }
             catch (Exception error) { Directory.CreateDirectory(results);File.WriteAllText(Path.Combine(results, "failure.txt"), error.ToString());Shutdown(1); }
+            return;
+        }
+        if (e.Args.Contains("--interaction-test", StringComparer.Ordinal))
+        {
+            var results = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Microsoft", "Amplifier for Windows Preview", "native-checks");
+            try { await InteractionChecks.RunAsync(results);Shutdown(0); }
+            catch (Exception error) { Directory.CreateDirectory(results);File.WriteAllText(Path.Combine(results,"interaction-failure.txt"),error.ToString());Shutdown(1); }
+            return;
+        }
+        if (e.Args.Length == 2 && e.Args[0] == "--workspace-check")
+        {
+            try { var target = new Endpoint(e.Args[1]);Shutdown(await new WebAppOpener().OpenAsync(target.Origin) ? 0 : 2); }
+            catch { Shutdown(1); }
             return;
         }
         var preview = e.Args.Contains("--preview", StringComparer.Ordinal);
