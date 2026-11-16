@@ -6,7 +6,7 @@ Amplifier Unified; platform implementation belongs here.
 
 The current source branch adds a .NET 10 WPF application, a platform-neutral core,
 and lossless packaging of the approved Mac avatar artwork. Build instructions and
-an exact qualification checklist accompany that implementation PR. A successful
+the exact qualification checklist are in [docs/qualification.md](docs/qualification.md). A successful
 cross-build does not establish Windows focus, DPI, notification or install behavior.
 
 Use synthetic test data and isolated test services. Do not restart a live server
