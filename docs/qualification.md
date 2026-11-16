@@ -65,7 +65,7 @@ own actual runtime qualification even though a publish target is available.
 Core checks cover stable Mac-compatible attention tiers, pinned notices outside
 active sessions, unread/working deduplication, size defaults, bounded preview
 revalidation, raw-tool exclusion, and exact-origin PWA launch arguments. Native
-R13 synthetic-window checks exercise actual wheel delivery through gaps at all
+Windows 11 synthetic-window checks exercise actual wheel delivery through gaps at all
 three sizes, no outside capture, retained row anchor and foreground focus, and
 visibility-mode changes preserving size/expansion. These checks use synthetic
 windows and no service writes. The installed Edge PWA was launched twice through
