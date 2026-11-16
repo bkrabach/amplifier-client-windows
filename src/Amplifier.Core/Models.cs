@@ -7,9 +7,10 @@ public sealed record Registration(string Id, string Address, string Name, string
     public string Label => string.IsNullOrWhiteSpace(Name) ? new Uri(Address).Authority : Name;
 }
 
+public sealed record DisplayHint(string Summary);
 public sealed record SessionActivity(bool Execution, bool Preparing, bool Loading);
 public sealed record Session(string Id, string Title, string Status, bool Pinned,
-    bool? AgentCreated, SessionActivity Activity)
+    bool? AgentCreated, SessionActivity Activity, DismissalDescriptor? Dismissal = null, DisplayHint? Display = null)
 {
     public bool Execution => Activity.Execution;
     public bool Preparing => Activity.Preparing;
@@ -17,7 +18,7 @@ public sealed record Session(string Id, string Title, string Status, bool Pinned
 }
 public sealed record NoticeTarget(string Type, string SessionId);
 public sealed record Notice(string Id, string Fingerprint, string Kind, NoticeTarget Target,
-    bool RequiresAction, bool Read, string Title, string Summary, bool? AgentCreated, bool Pinned);
+    bool RequiresAction, bool Read, string Title, string Summary, bool? AgentCreated, bool Pinned, DismissalDescriptor? Dismissal = null);
 public sealed record Activity(int ExecutionCount, int PreparingCount, int LoadingCount,
     int AttentionCount, int RequiresActionCount);
 public sealed record Observation(string HostIdentity, string HostInstanceId,

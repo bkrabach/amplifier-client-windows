@@ -6,16 +6,11 @@ This is an implementation choice, not a change to shared state/permission contra
 Core protocol/presentation code is independent of Windows and testable without UI.
 
 Use advertised version-1 observations: native attachment without browser state,
-sessions, attention and incremental activity. Shipped hosts currently advertise
-these resources to native clients but their companion-v1 scope denies the generic
-session/attention routes. For an approved restricted credential, only a 403 from
-the advertised session collection admits the temporary `/api/companion` v1 read
-adapter. Validate its durable/instance identity, finish both bounded cursor sides,
-retain a terminal-side cursor while the other continues, and retrieve exact activity
-counts through the supported activity resource. A 401 never admits fallback.
-This compatibility path is delivery support for current hosts, not a new canonical
-API or authority grant. Remove it after the canonical host's scoped generic reads
-are available on supported releases. No host mutation/restart is required.
+sessions, attention and incremental activity. The coordinated cutover removes the
+companion adapter and its permission-denial fallback. Unsupported hosts report
+that they need a compatible service; clients never broaden credentials to recover.
+Shared exact-state dismissal and safe preview projection are coordinated with the
+canonical service contract. This branch is not deployed compatibility evidence.
 One bounded observation traversal per service publishes complete results only;
 pagination, deadlines, protocol errors and authentication failures fail closed.
 TLS validation stays enabled, redirects and cookies disabled, and advertised URLs
@@ -64,3 +59,17 @@ with the same Chromium app/shortcut URL arguments used by the Mac adapter. No
 browser profile database, cookies or credentials are read. Other/ambiguous origins
 retain ordinary browser navigation. Launch-handler support in the web app remains
 necessary for warm in-place navigation; discovery alone does not prove reuse.
+
+### Shared display receipts
+
+Each active/preparing session and attention row supplies a host-issued dismissal
+identity/fingerprint. `SharedDismissals` persists an exact pending intent before
+hiding it locally. The client retries only that idempotent display receipt after
+connection recovery; it never retargets a newer state or replays a chat command.
+A complete fresh observation retires accepted/obsolete intent. Other devices see
+the accepted host receipt through the same generic collections. Read/approval
+state and counts keep their canonical meanings. Corrupt local state is retained
+for recovery. Appearance, geometry, hover/visibility, grouping and sound remain
+local; host pins are the shared opt-in for agent-created chats.
+
+Candidate shared wire owner: [presentation contract](https://github.com/microsoft/amplifier-unified/blob/e7bc197dd/docs/clients/presentation.md) at `e7bc197dd`, based on accepted `46f0fe683b6bf87914fcda170e0ef3f6bd26f67f`. Candidate qualification is separate from service release/adoption.

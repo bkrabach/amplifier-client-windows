@@ -21,6 +21,8 @@ internal sealed class ServiceRuntime(Registration registration, HostTransport tr
     public NoticeDetails Details { get; } = new();
     public string Status = "Connecting…";
     public bool Sending;
+    public bool SyncingDismissals;
+    public string? DismissalStatus;
     public void Dispose() { Cancellation.Cancel();Transport.Dispose();Cancellation.Dispose(); }
 }
 
@@ -37,6 +39,7 @@ internal sealed class ClientController : IDisposable
     private readonly WebAppOpener webApp = new();
     private SettingsWindow? settings;
     private bool disposed;
+    private readonly SharedDismissals dismissals;
     public event Action? Changed;
     public IReadOnlyList<NoticeRow> Rows { get; private set; } = [];
     public IReadOnlyList<NoticeRow> AllRows { get; private set; } = [];
@@ -49,6 +52,8 @@ internal sealed class ClientController : IDisposable
     {
         Preview = preview;
         preferencePath = Path.Combine(directory, "preferences.json");
+        dismissals = new SharedDismissals(Path.Combine(directory, "dismissals.json"));
+        _ = dismissals.Entries; // Preserve/report a corrupt journal; never reset silently.
         Preferences = AtomicFile.Read(preferencePath, () => new Preferences());
         if (Preferences.Version != 1 || Preferences.Services.Select(x => x.Id).Distinct().Count() != Preferences.Services.Count)
             throw new InvalidDataException("Unsupported or corrupt saved service catalog.");
@@ -108,12 +113,33 @@ internal sealed class ClientController : IDisposable
     }
     public void Dismiss(NoticeRow row)
     {
-        Preferences.Dismissed[row.Key] = row.Fingerprint;
-        while (Preferences.Dismissed.Count > 512) Preferences.Dismissed.Remove(Preferences.Dismissed.Keys.First());
-        Save();Refresh();
+        if (Preview) { Preferences.Dismissed[row.Key] = row.Fingerprint; Refresh(); return; }
+        if (!services.TryGetValue(row.RegistrationId, out var runtime) || runtime.Registration.HostIdentity != row.HostIdentity || row.Dismissal == null) return;
+        try { dismissals.Save(runtime.Registration, row.Dismissal); Refresh(); _ = SyncDismissalsAsync(runtime); }
+        catch (Exception) { runtime.DismissalStatus = "Couldn't save dismissal — try again"; Changed?.Invoke(); }
+    }
+    private static DismissalDescriptor[] Descriptors(Observation snapshot) => snapshot.Notices.Select(x => x.Dismissal)
+        .Concat(snapshot.Sessions.Select(x => x.Dismissal)).OfType<DismissalDescriptor>().ToArray();
+    private async Task SyncDismissalsAsync(ServiceRuntime runtime)
+    {
+        if (runtime.SyncingDismissals || runtime.Observation == null) return;
+        runtime.SyncingDismissals = true;
+        try
+        {
+            foreach (var entry in dismissals.Entries.Where(x => SharedDismissals.Matches(x, runtime.Registration) && !x.Accepted).Take(20))
+            {
+                if (!services.TryGetValue(runtime.Registration.Id, out var current) || current != runtime) return;
+                await new ObservationClient(runtime.Transport).DismissAsync(entry, runtime.Cancellation.Token);
+                dismissals.Accepted(entry.RequestId);
+            }
+            runtime.DismissalStatus = null;
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception) { runtime.DismissalStatus = "Dismissals waiting to sync"; }
+        finally { runtime.SyncingDismissals = false; if (!disposed) Refresh(); }
     }
     public void ToggleTempo() { Preferences.HideTempo = !Preferences.HideTempo;Save();if (Preferences.HideTempo) tempo.Hide();else tempo.Show();Refresh(); }
-    public string Status(string id) => services.TryGetValue(id, out var runtime) ? runtime.Status : "Disconnected";
+    public string Status(string id) => services.TryGetValue(id, out var runtime) ? runtime.Status + (runtime.DismissalStatus == null ? "" : " · " + runtime.DismissalStatus) : "Disconnected";
     public async Task RegisterAsync(Endpoint endpoint, string label, string token, CancellationToken cancellation)
     {
         if (Preview) throw new InvalidOperationException("Connections are disabled in the isolated preview.");
@@ -175,7 +201,14 @@ internal sealed class ClientController : IDisposable
                 await observer.AttachAsync(runtime.Registration.HostIdentity, token);
                 var snapshot = await observer.PollAsync(token);
                 if (!services.TryGetValue(runtime.Registration.Id, out var current) || current != runtime) return;
-                runtime.Details.Reconcile(snapshot);runtime.Observation = snapshot;runtime.Status = "Connected";delay = Preferences.HideTempo ? 15 : 5;
+                runtime.Details.Reconcile(snapshot);runtime.Observation = snapshot;
+                dismissals.Reconcile(runtime.Registration, Descriptors(snapshot));
+                // Migrate only exact observed attention states. Historical work
+                // labels cannot be translated into host-issued activity identity.
+                foreach (var row in Presentation.Rows(runtime.Registration, snapshot, false))
+                    if (row.Dismissal != null && Preferences.Dismissed.GetValueOrDefault(row.Key) == row.Fingerprint)
+                    { dismissals.Save(runtime.Registration, row.Dismissal); Preferences.Dismissed.Remove(row.Key); Save(); }
+                await SyncDismissalsAsync(runtime);runtime.Status = "Connected";delay = Preferences.HideTempo ? 15 : 5;
             }
             catch (OperationCanceledException) when (token.IsCancellationRequested) { return; }
             catch (HostException error) when (error.AuthenticationLost)
@@ -204,7 +237,7 @@ internal sealed class ClientController : IDisposable
     {
         if (disposed) return;
         AllRows = Services.Where(x => x.Observation != null).SelectMany(x => Presentation.Rows(x.Registration, x.Observation!, Preferences.IncludeWorking).Select(row => x.Details.Enrich(row, x.Observation!))).ToArray();
-        Rows = Presentation.Sort(AllRows.Where(x => !Presentation.Dismissed(x, Preferences.Dismissed)), Preferences.Services.Select(x => x.Id).ToArray(), Preferences.GroupByService);
+        Rows = Presentation.Sort(AllRows.Where(x => Preview ? !Presentation.Dismissed(x, Preferences.Dismissed) : x.Dismissal == null || !dismissals.Hidden(services[x.RegistrationId].Registration, x.Dismissal)), Preferences.Services.Select(x => x.Id).ToArray(), Preferences.GroupByService);
         var menu = new Forms.ContextMenuStrip();
         menu.Items.Add(Connected ? Attention + " updates · " + Working + " working" : "No services connected").Enabled = false;
         menu.Items.Add("Open Amplifier", null, (_, _) => OpenDefault());

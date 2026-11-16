@@ -26,7 +26,7 @@ public sealed class NoticeDetails
     public NoticeRow Enrich(NoticeRow row, Observation observation)
     {
         if (row.State == AvatarState.Working && work.TryGetValue(row.SessionId, out var action))
-            return row with { Detail = (row.Attention ? "Unread · " : "") + action.Text, Fingerprint = row.Attention ? row.Fingerprint : row.Fingerprint + action.State };
+            return row with { Detail = (row.Attention ? "Unread · " : "") + action.Text, Fingerprint = row.Attention || row.Dismissal != null ? row.Fingerprint : row.Fingerprint + action.State };
         var notice = observation.Notices.FirstOrDefault(n => n.Target.SessionId == row.SessionId && row.Key.EndsWith(":" + n.Id, StringComparison.Ordinal));
         return notice != null && previews.TryGetValue(Key(notice), out var text) ? row with { Detail = text } : row;
     }
