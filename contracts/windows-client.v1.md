@@ -17,7 +17,9 @@ Source implementation, physical acceptance and published delivery are distinct.
 - **WP4: Deliberate authority.** Browser comparison-code approval issues the existing
   restricted chat credential. Windows protects secrets for the current OS user.
   No cookies, bearer tokens or machine identifiers enter navigation or logs.
-  Unsupported discovery fails visibly; no implicit full-control fallback.
+  Unsupported discovery fails visibly; no implicit full-control fallback. The
+  documented restricted-host compatibility adapter changes only the read route,
+  after an exact generic-read denial; scope and pinned host remain unchanged.
 - **WP5: Recovery.** Save reply intent before sending. Uncertain commands retain
   their original ID, payload and destination. No automatic resend on startup,
   reconnect, wake or a repeated activation. An unavailable service cannot receive

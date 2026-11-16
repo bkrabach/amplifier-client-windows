@@ -5,6 +5,7 @@ namespace Amplifier.Core;
 public sealed class ObservationClient(HostTransport transport)
 {
     private string? hostIdentity, instanceId;
+    private bool compatibilityFeed;
     private readonly Dictionary<string, string> resources = [];
     private readonly SemaphoreSlim gate = new(1, 1);
 
@@ -47,7 +48,17 @@ public sealed class ObservationClient(HostTransport transport)
             {
                 try
                 {
-                    var sessions = await CollectionAsync<Session>("sessions", budget.Token);
+                    if (compatibilityFeed) return await CompatibilityAsync(budget.Token);
+                    IReadOnlyList<Session> sessions;
+                    try { sessions = await CollectionAsync<Session>("sessions", budget.Token); }
+                    catch (HostException error) when (error.Status == 403 && transport.RestrictedCredential)
+                    {
+                        // Shipped companion-v1 scopes can advertise generic observations but deny
+                        // this route. Only this exact denial admits the versioned, read-only adapter.
+                        var compatible = await CompatibilityAsync(budget.Token);
+                        compatibilityFeed = true;
+                        return compatible;
+                    }
                     var notices = await CollectionAsync<Notice>("attention", budget.Token);
                     var activity = await ActivityAsync(budget.Token);
                     return new(hostIdentity, instanceId, sessions, notices, activity);
@@ -82,6 +93,17 @@ public sealed class ObservationClient(HostTransport transport)
             revision = current;
             var items = value.GetProperty("items");
             if (items.GetArrayLength() > 200) throw new InvalidDataException("Oversized observation page.");
+            result.AddRange(ParseItems<T>(items));
+            cursor = value.GetProperty("nextCursor").GetString();
+            if (cursor == null) return result;
+            if (cursor.Length is 0 or > 8192 || !seen.Add(cursor)) throw new InvalidDataException("Invalid or repeated observation cursor.");
+        }
+        throw new InvalidDataException("Observation exceeded its traversal limit; no partial result published.");
+    }
+
+    private static IReadOnlyList<T> ParseItems<T>(JsonElement items)
+    {
+        var result = new List<T>();
             foreach (var item in items.EnumerateArray())
             {
                 _ = item.RequiredText("id");
@@ -104,11 +126,79 @@ public sealed class ObservationClient(HostTransport transport)
                 }
                 result.Add(item.Deserialize<T>(Json.Options) ?? throw new InvalidDataException("Invalid observation item."));
             }
-            cursor = value.GetProperty("nextCursor").GetString();
-            if (cursor == null) return result;
-            if (cursor.Length is 0 or > 8192 || !seen.Add(cursor)) throw new InvalidDataException("Invalid or repeated observation cursor.");
+        return result;
+    }
+
+    private async Task<JsonElement> CompatibilityPageAsync(string path, CancellationToken cancellation)
+    {
+        for (var attempt = 0; ; attempt++)
+        {
+            try { return await transport.RequestAsync(path, null, cancellation); }
+            catch (HostException e) when (e.Status == 503 && attempt < 2)
+            {
+                // Finish the immutable count traversal before retrying this read only.
+                await ActivityAsync(cancellation);
+            }
         }
-        throw new InvalidDataException("Observation exceeded its traversal limit; no partial result published.");
+    }
+
+    private async Task<Observation> CompatibilityAsync(CancellationToken cancellation)
+    {
+        var sessions = new List<Session>();var notices = new List<Notice>();
+        var sessionIds = new HashSet<string>();var noticeIds = new HashSet<string>();
+        var seenSessions = new HashSet<string>();var seenItems = new HashSet<string>();
+        string? sessionCursor = null, itemCursor = null, retainedSessionCursor = null, retainedItemCursor = null;
+        bool sessionDone = false, itemsDone = false;
+        for (var page = 0; page < 256; page++)
+        {
+            var query = new List<string>();
+            if (retainedSessionCursor != null) query.Add("sessionsCursor=" + Uri.EscapeDataString(retainedSessionCursor));
+            if (retainedItemCursor != null) query.Add("itemsCursor=" + Uri.EscapeDataString(retainedItemCursor));
+            var path = "/api/companion" + (query.Count > 0 ? "?" + string.Join("&", query) : "");
+            var value = await CompatibilityPageAsync(path, cancellation);
+            if (value.GetProperty("protocolVersion").GetInt32() != 1 ||
+                value.RequiredText("hostIdentity") != hostIdentity || value.RequiredText("hostInstanceId") != instanceId)
+                throw new InvalidDataException("Companion compatibility identity or version changed.");
+            if (!sessionDone)
+            {
+                var array = value.GetProperty("sessions");
+                if (array.GetArrayLength() > 50) throw new InvalidDataException("Oversized compatibility session page.");
+                foreach (var session in ParseItems<Session>(array))
+                {
+                    if (!sessionIds.Add(session.Id)) throw new InvalidDataException("Duplicate session in compatibility traversal.");
+                    sessions.Add(session);
+                }
+                sessionCursor = value.GetProperty("sessionsNextCursor").GetString();
+                if (value.GetProperty("sessionsTruncated").GetBoolean() != (sessionCursor != null)) throw new InvalidDataException("Incomplete session continuation.");
+                sessionDone = sessionCursor == null;
+                if (!sessionDone)
+                {
+                    if (sessionCursor!.Length is 0 or > 8192 || !seenSessions.Add(sessionCursor)) throw new InvalidDataException("Invalid compatibility session cursor.");
+                    retainedSessionCursor = sessionCursor;
+                }
+            }
+            if (!itemsDone)
+            {
+                var array = value.GetProperty("items");
+                if (array.GetArrayLength() > 200) throw new InvalidDataException("Oversized compatibility notice page.");
+                foreach (var notice in ParseItems<Notice>(array))
+                {
+                    if (!noticeIds.Add(notice.Id)) throw new InvalidDataException("Duplicate notice in compatibility traversal.");
+                    notices.Add(notice with { Kind = notice.Kind switch { "session" => "session-error", "unread" => "manual-unread", _ => notice.Kind } });
+                }
+                itemCursor = value.GetProperty("itemsNextCursor").GetString();
+                if (value.GetProperty("itemsTruncated").GetBoolean() != (itemCursor != null)) throw new InvalidDataException("Incomplete notice continuation.");
+                itemsDone = itemCursor == null;
+                if (!itemsDone)
+                {
+                    if (itemCursor!.Length is 0 or > 8192 || !seenItems.Add(itemCursor)) throw new InvalidDataException("Invalid compatibility notice cursor.");
+                    retainedItemCursor = itemCursor;
+                }
+            }
+            if (sessionDone && itemsDone)
+                return new(hostIdentity!, instanceId!, sessions, notices, await ActivityAsync(cancellation));
+        }
+        throw new InvalidDataException("Compatibility observation exceeded its traversal limit.");
     }
 
     private async Task<Activity> ActivityAsync(CancellationToken cancellation)

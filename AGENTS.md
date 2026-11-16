@@ -2,7 +2,9 @@
 
 Read docs/VISION.md, contracts/windows-client.v1.md and docs/architecture.md.
 Keep shared DC/CX/CS meaning in Unified; record exact reviewed sources and gaps.
-Use the supported observation/pairing contracts, not Mac's temporary companion API.
+Use generic observation/pairing contracts first. The documented restricted-host
+compatibility path may read the versioned companion adapter only after its exact
+403 capability mismatch; never broaden credentials or silently change authority.
 Never bypass TLS, copy browser credentials, replay uncertain input, or infer device
 execution authority from chat pairing. Preserve other clients and live services.
 

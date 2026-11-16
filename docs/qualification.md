@@ -28,6 +28,8 @@ contains a browser/desktop task executor or host credentials in navigation.
 ## Implemented and source-tested
 
 - HTTPS origin restrictions and scoped attach/observation discovery.
+- Versioned compatibility reads for the shipped restricted companion scope after
+  an exact generic-session 403; no fallback on revoked credentials or wider scope.
 - Sequential bounded pagination, empty continuation pages, count completion,
   coherent revisions, cursor recovery, authentication failure and response bounds.
 - Per-service isolation, explicit global/grouped ordering and local dismissal.
