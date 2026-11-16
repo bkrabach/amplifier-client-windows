@@ -6,7 +6,16 @@ This is an implementation choice, not a change to shared state/permission contra
 Core protocol/presentation code is independent of Windows and testable without UI.
 
 Use advertised version-1 observations: native attachment without browser state,
-sessions, attention and incremental activity. Do not adopt `/api/companion`.
+sessions, attention and incremental activity. Shipped hosts currently advertise
+these resources to native clients but their companion-v1 scope denies the generic
+session/attention routes. For an approved restricted credential, only a 403 from
+the advertised session collection admits the temporary `/api/companion` v1 read
+adapter. Validate its durable/instance identity, finish both bounded cursor sides,
+retain a terminal-side cursor while the other continues, and retrieve exact activity
+counts through the supported activity resource. A 401 never admits fallback.
+This compatibility path is delivery support for current hosts, not a new canonical
+API or authority grant. Remove it after the canonical host's scoped generic reads
+are available on supported releases. No host mutation/restart is required.
 One bounded observation traversal per service publishes complete results only;
 pagination, deadlines, protocol errors and authentication failures fail closed.
 TLS validation stays enabled, redirects and cookies disabled, and advertised URLs

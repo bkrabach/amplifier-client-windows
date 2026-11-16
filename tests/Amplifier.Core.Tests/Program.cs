@@ -125,6 +125,63 @@ await Check("attention reaction settles back to ongoing animation without replay
     playback.Update(true,false,1,[row],0);Assert(playback.Presentation(1).State==AvatarState.Ready);
     playback.Update(true,false,1,[row],5);Assert(playback.Presentation(5).State==AvatarState.Working);return Task.CompletedTask;
 });
+
+string Compatibility(string sessions, string notices, string sessionsCursor = "null", string itemsCursor = "null", string identity = "host-a", int protocol = 1)
+    => JsonSerializer.Serialize(new { protocolVersion = protocol, hostIdentity = identity, hostInstanceId = "instance-a",
+        sessions = JsonSerializer.Deserialize<JsonElement>("[" + sessions + "]"), items = JsonSerializer.Deserialize<JsonElement>("[" + notices + "]"),
+        sessionsNextCursor = JsonSerializer.Deserialize<string?>(sessionsCursor), itemsNextCursor = JsonSerializer.Deserialize<string?>(itemsCursor),
+        sessionsTruncated = sessionsCursor != "null", itemsTruncated = itemsCursor != "null" });
+
+HostTransport Restricted(Func<HttpRequestMessage,CancellationToken,Task<HttpResponseMessage>> handle) => new(endpoint,"amc_"+new string('0',32)+"."+new string('a',64),handler:new Handler(handle));
+await Check("restricted scope 403 admits only verified read compatibility", async () => {
+    var paths=new List<string>();
+    using var transport=Restricted((req,_)=>{
+        paths.Add(req.RequestUri!.PathAndQuery);
+        return Task.FromResult(req.RequestUri.AbsolutePath switch {
+            "/api/clients/attach"=>Response(attach), "/api/sessions"=>Response("{}",403),
+            "/api/companion"=>Response(Compatibility(session,"")), "/api/activity"=>Response(ready),
+            _=>throw new TestFailure("Unexpected route") });
+    });
+    var client=new ObservationClient(transport);await client.AttachAsync(null,default);var result=await client.PollAsync(default);
+    Assert(result.Sessions.Single().Id=="chat-a" && result.Activity.ExecutionCount==1);
+    await client.PollAsync(default);Assert(paths.Count(p=>p.StartsWith("/api/sessions"))==1);
+});
+await Check("401 never falls back and unscoped 403 never falls back", async () => {
+    foreach(var status in new[]{401,403}){
+        int reads=0;var handler=new Handler((req,_)=>Task.FromResult(req.RequestUri!.AbsolutePath=="/api/clients/attach"?Response(attach):(++reads==1?Response("{}",status):throw new TestFailure("Unexpected fallback"))));
+        using var transport=new HostTransport(endpoint,status==401?"amc_"+new string('0',32)+"."+new string('a',64):null,handler:handler);
+        var client=new ObservationClient(transport);await client.AttachAsync(null,default);await Reject(()=>client.PollAsync(default));Assert(reads==1);
+    }
+});
+await Check("compatibility rejects changed host and unsupported version", async () => {
+    foreach(var value in new[]{Compatibility("","",identity:"other"),Compatibility("","",protocol:2)}){
+        using var transport=Restricted((req,_)=>Task.FromResult(req.RequestUri!.AbsolutePath switch {"/api/clients/attach"=>Response(attach),"/api/sessions"=>Response("{}",403),_=>Response(value)}));
+        var client=new ObservationClient(transport);await client.AttachAsync(null,default);await Reject(()=>client.PollAsync(default));
+    }
+});
+await Check("compatibility retains terminal-side cursor and does not duplicate rows", async () => {
+    var notice="""{"id":"notice-a","fingerprint":"f","kind":"session","target":{"type":"session","sessionId":"chat-a"},"requiresAction":true,"read":false,"title":"Error","summary":"Review","agentCreated":false}""";
+    var pages=new Queue<string>([Compatibility("","","\"s1\"","\"n1\""),Compatibility(session,"",itemsCursor:"\"n2\""),Compatibility(session,notice)]);
+    int companion=0;
+    using var transport=Restricted((req,_)=>{
+        if(req.RequestUri!.AbsolutePath=="/api/companion"){
+            companion++;if(companion==3)Assert(req.RequestUri.Query.Contains("sessionsCursor=s1")&&req.RequestUri.Query.Contains("itemsCursor=n2"));
+            return Task.FromResult(Response(pages.Dequeue()));
+        }
+        return Task.FromResult(req.RequestUri.AbsolutePath switch {"/api/clients/attach"=>Response(attach),"/api/sessions"=>Response("{}",403),"/api/activity"=>Response(ready),_=>throw new TestFailure("Unexpected route")});
+    });
+    var client=new ObservationClient(transport);await client.AttachAsync(null,default);var result=await client.PollAsync(default);
+    Assert(result.Sessions.Count==1&&result.Notices.Single().Kind=="session-error"&&companion==3);
+});
+await Check("compatibility completes pending counts before retrying observation", async () => {
+    int companion=0,counts=0;
+    using var transport=Restricted((req,_)=>Task.FromResult(req.RequestUri!.AbsolutePath switch {
+        "/api/clients/attach"=>Response(attach),"/api/sessions"=>Response("{}",403),
+        "/api/companion"=>++companion==1?Response("{}",503):Response(Compatibility("","")),
+        "/api/activity"=>++counts==1?Response("""{"revision":7,"status":"collecting","nextCursor":"finish"}""",202):Response(ready),
+        _=>throw new TestFailure("Unexpected route")}));
+    var client=new ObservationClient(transport);await client.AttachAsync(null,default);await client.PollAsync(default);Assert(companion==2&&counts==3);
+});
 var temp=Path.Combine(Path.GetTempPath(),"amplifier-core-tests-"+Guid.NewGuid().ToString("N"));Directory.CreateDirectory(temp);
 try {
     await Check("saved intent survives uncertain delivery; explicit retry preserves ID", async () => {

@@ -12,10 +12,12 @@ public sealed class HostTransport : IDisposable
     private readonly SemaphoreSlim requestGate = new(1, 1);
     public Endpoint Endpoint { get; }
     public string ClientId { get; }
+    public bool RestrictedCredential { get; }
     public HostTransport(Endpoint endpoint, string? token = null, string? clientId = null,
         HttpMessageHandler? handler = null)
     {
         Endpoint = endpoint;
+        RestrictedCredential = token != null;
         ClientId = clientId ?? Guid.NewGuid().ToString("N");
         if (token != null)
         {
