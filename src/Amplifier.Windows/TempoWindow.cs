@@ -211,7 +211,7 @@ internal sealed class NoticeWindow : Window
             var open = new Button { Content = text, Background = Brushes.Transparent, BorderThickness = new Thickness(0), Padding = new Thickness(0), HorizontalContentAlignment = HorizontalAlignment.Stretch };
             AutomationProperties.SetName(open, row.Title + ", " + row.Detail + ". Open chat");open.Click += (_, _) => owner.OpenChat(row);Grid.SetColumn(open, 1);body.Children.Add(open);
             var close = new Button { Content = "×", Foreground = Brushes.LightGray, Background = Brushes.Transparent, BorderThickness = new Thickness(0), Padding = new Thickness(0), FontSize = 20 };
-            close.ToolTip = row.State == AvatarState.Working ? "Hide until activity changes" : "Hide from Tempo; keep unread";AutomationProperties.SetName(close, "Dismiss " + row.Title);close.Click += (_, _) => owner.Dismiss(row);Grid.SetColumn(close, 2);body.Children.Add(close);
+            close.ToolTip = row.State == AvatarState.Working ? "Hide on all devices until activity changes" : "Hide on all devices; keep unread";AutomationProperties.SetName(close, "Dismiss " + row.Title);close.Click += (_, _) => owner.Dismiss(row);Grid.SetColumn(close, 2);body.Children.Add(close);
             cards.Children.Add(new Border { Tag = row.Key, Height = 58, Margin = new Thickness(0, 4, 0, 4), Background = new SolidColorBrush(Color.FromArgb(238, 38, 44, 52)), CornerRadius = new CornerRadius(27), Child = body });
         }
         Dispatcher.BeginInvoke(() =>

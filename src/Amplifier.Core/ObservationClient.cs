@@ -5,7 +5,6 @@ namespace Amplifier.Core;
 public sealed class ObservationClient(HostTransport transport)
 {
     private string? hostIdentity, instanceId;
-    private bool compatibilityFeed;
     private readonly Dictionary<string, string> resources = [];
     private readonly SemaphoreSlim gate = new(1, 1);
 
@@ -22,6 +21,10 @@ public sealed class ObservationClient(HostTransport transport)
             !capabilities.TryGetProperty("observations", out var observations) ||
             observations.GetProperty("version").GetInt32() != 1)
             throw new InvalidDataException("This host does not advertise supported observations.");
+        if (!observations.TryGetProperty("dismissals", out var dismissals) ||
+            dismissals.GetProperty("version").GetInt32() != 1 || dismissals.RequiredText("action") != "presentation.dismiss" ||
+            !observations.TryGetProperty("identity", out var identityFlag) || !identityFlag.GetBoolean())
+            throw new InvalidDataException("Update this service to support shared updates across devices.");
         foreach (var name in new[] { "sessions", "attention", "activity" })
         {
             var resource = observations.RequiredText(name);
@@ -48,17 +51,7 @@ public sealed class ObservationClient(HostTransport transport)
             {
                 try
                 {
-                    if (compatibilityFeed) return await CompatibilityAsync(budget.Token);
-                    IReadOnlyList<Session> sessions;
-                    try { sessions = await CollectionAsync<Session>("sessions", budget.Token); }
-                    catch (HostException error) when (error.Status == 403 && transport.RestrictedCredential)
-                    {
-                        // Shipped companion-v1 scopes can advertise generic observations but deny
-                        // this route. Only this exact denial admits the versioned, read-only adapter.
-                        var compatible = await CompatibilityAsync(budget.Token);
-                        compatibilityFeed = true;
-                        return compatible;
-                    }
+                    var sessions = await CollectionAsync<Session>("sessions", budget.Token);
                     var notices = await CollectionAsync<Notice>("attention", budget.Token);
                     var activity = await ActivityAsync(budget.Token);
                     return new(hostIdentity, instanceId, sessions, notices, activity);
@@ -70,6 +63,20 @@ public sealed class ObservationClient(HostTransport transport)
         finally { gate.Release(); }
     }
 
+    private void VerifyIdentity(JsonElement value)
+    {
+        if (value.RequiredText("hostIdentity") != hostIdentity) throw new InvalidDataException("The observed host changed. Reapprove explicitly.");
+        if (value.RequiredText("hostInstanceId") != instanceId) throw new HostException(400, "The service restarted; rediscover observations.");
+    }
+    public async Task DismissAsync(DismissalIntent intent, CancellationToken cancellation)
+    {
+        if (intent.Endpoint != transport.Endpoint.ToString()) throw new InvalidDataException("Dismissal belongs to another service.");
+        await AttachAsync(intent.HostIdentity, cancellation);
+        var response = await transport.RequestAsync("/api/actions", new { id = intent.RequestId, action = "presentation.dismiss",
+            args = new { items = new[] { new { id = intent.Id, fingerprint = intent.Fingerprint } } } }, cancellation);
+        if (!response.TryGetProperty("accepted", out var accepted) || !accepted.GetBoolean())
+            throw new InvalidDataException("Dismissal synchronization is unconfirmed.");
+    }
     private string PagePath(string name, string? cursor)
     {
         var path = resources[name];
@@ -84,15 +91,19 @@ public sealed class ObservationClient(HostTransport transport)
     {
         var result = new List<T>();
         var seen = new HashSet<string>();
+        var ids = new HashSet<string>();
         string? cursor = null, revision = null;
         for (var page = 0; page < 256; page++)
         {
             var value = await transport.RequestAsync(PagePath(name, cursor), null, cancellation);
+            VerifyIdentity(value);
             var current = value.GetProperty("revision").GetRawText();
             if (revision != null && revision != current) throw new InvalidDataException("Incoherent observation pages.");
             revision = current;
             var items = value.GetProperty("items");
             if (items.GetArrayLength() > 200) throw new InvalidDataException("Oversized observation page.");
+            foreach (var item in items.EnumerateArray())
+                if (!ids.Add(item.RequiredText("id"))) throw new InvalidDataException("Duplicate observation item.");
             result.AddRange(ParseItems<T>(items));
             cursor = value.GetProperty("nextCursor").GetString();
             if (cursor == null) return result;
@@ -124,81 +135,15 @@ public sealed class ObservationClient(HostTransport transport)
                     var target = item.GetProperty("target");
                     if (target.RequiredText("type") == "session") _ = target.RequiredText("sessionId");
                 }
+                if (item.TryGetProperty("dismissal", out var dismissal) && dismissal.ValueKind != JsonValueKind.Null)
+                {
+                    _ = dismissal.RequiredText("id"); _ = dismissal.RequiredText("fingerprint"); _ = dismissal.GetProperty("dismissed").GetBoolean();
+                }
+                else if (typeof(T) == typeof(Notice) || item.GetProperty("activity").GetProperty("execution").GetBoolean() || item.GetProperty("activity").GetProperty("preparing").GetBoolean())
+                    throw new InvalidDataException("Missing shared update identity.");
                 result.Add(item.Deserialize<T>(Json.Options) ?? throw new InvalidDataException("Invalid observation item."));
             }
         return result;
-    }
-
-    private async Task<JsonElement> CompatibilityPageAsync(string path, CancellationToken cancellation)
-    {
-        for (var attempt = 0; ; attempt++)
-        {
-            try { return await transport.RequestAsync(path, null, cancellation); }
-            catch (HostException e) when (e.Status == 503 && attempt < 2)
-            {
-                // Finish the immutable count traversal before retrying this read only.
-                await ActivityAsync(cancellation);
-            }
-        }
-    }
-
-    private async Task<Observation> CompatibilityAsync(CancellationToken cancellation)
-    {
-        var sessions = new List<Session>();var notices = new List<Notice>();
-        var sessionIds = new HashSet<string>();var noticeIds = new HashSet<string>();
-        var seenSessions = new HashSet<string>();var seenItems = new HashSet<string>();
-        string? sessionCursor = null, itemCursor = null, retainedSessionCursor = null, retainedItemCursor = null;
-        bool sessionDone = false, itemsDone = false;
-        for (var page = 0; page < 256; page++)
-        {
-            var query = new List<string>();
-            if (retainedSessionCursor != null) query.Add("sessionsCursor=" + Uri.EscapeDataString(retainedSessionCursor));
-            if (retainedItemCursor != null) query.Add("itemsCursor=" + Uri.EscapeDataString(retainedItemCursor));
-            var path = "/api/companion" + (query.Count > 0 ? "?" + string.Join("&", query) : "");
-            var value = await CompatibilityPageAsync(path, cancellation);
-            if (value.GetProperty("protocolVersion").GetInt32() != 1 ||
-                value.RequiredText("hostIdentity") != hostIdentity || value.RequiredText("hostInstanceId") != instanceId)
-                throw new InvalidDataException("Companion compatibility identity or version changed.");
-            if (!sessionDone)
-            {
-                var array = value.GetProperty("sessions");
-                if (array.GetArrayLength() > 50) throw new InvalidDataException("Oversized compatibility session page.");
-                foreach (var session in ParseItems<Session>(array))
-                {
-                    if (!sessionIds.Add(session.Id)) throw new InvalidDataException("Duplicate session in compatibility traversal.");
-                    sessions.Add(session);
-                }
-                sessionCursor = value.GetProperty("sessionsNextCursor").GetString();
-                if (value.GetProperty("sessionsTruncated").GetBoolean() != (sessionCursor != null)) throw new InvalidDataException("Incomplete session continuation.");
-                sessionDone = sessionCursor == null;
-                if (!sessionDone)
-                {
-                    if (sessionCursor!.Length is 0 or > 8192 || !seenSessions.Add(sessionCursor)) throw new InvalidDataException("Invalid compatibility session cursor.");
-                    retainedSessionCursor = sessionCursor;
-                }
-            }
-            if (!itemsDone)
-            {
-                var array = value.GetProperty("items");
-                if (array.GetArrayLength() > 200) throw new InvalidDataException("Oversized compatibility notice page.");
-                foreach (var notice in ParseItems<Notice>(array))
-                {
-                    if (!noticeIds.Add(notice.Id)) throw new InvalidDataException("Duplicate notice in compatibility traversal.");
-                    notices.Add(notice with { Kind = notice.Kind switch { "session" => "session-error", "unread" => "manual-unread", _ => notice.Kind } });
-                }
-                itemCursor = value.GetProperty("itemsNextCursor").GetString();
-                if (value.GetProperty("itemsTruncated").GetBoolean() != (itemCursor != null)) throw new InvalidDataException("Incomplete notice continuation.");
-                itemsDone = itemCursor == null;
-                if (!itemsDone)
-                {
-                    if (itemCursor!.Length is 0 or > 8192 || !seenItems.Add(itemCursor)) throw new InvalidDataException("Invalid compatibility notice cursor.");
-                    retainedItemCursor = itemCursor;
-                }
-            }
-            if (sessionDone && itemsDone)
-                return new(hostIdentity!, instanceId!, sessions, notices, await ActivityAsync(cancellation));
-        }
-        throw new InvalidDataException("Compatibility observation exceeded its traversal limit.");
     }
 
     private async Task<Activity> ActivityAsync(CancellationToken cancellation)
@@ -208,6 +153,7 @@ public sealed class ObservationClient(HostTransport transport)
         for (var page = 0; page < 256; page++)
         {
             var value = await transport.RequestAsync(PagePath("activity", cursor), null, cancellation);
+            VerifyIdentity(value);
             var current = value.GetProperty("revision").GetRawText();
             if (revision != null && revision != current) throw new InvalidDataException("Incoherent activity pages.");
             revision = current;

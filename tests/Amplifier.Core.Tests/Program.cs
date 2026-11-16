@@ -6,14 +6,18 @@ using System.Text.Json;
 var passed = 0;
 var endpoint = new Endpoint("https://example.test");
 var registration = new Registration("service-a", endpoint.ToString(), "Example", "host-a");
-const string attach = """{"protocolVersion":1,"hostIdentity":"host-a","hostInstanceId":"instance-a","capabilities":{"observations":{"version":1,"sessions":"/api/sessions?view=observation","attention":"/api/attention","activity":"/api/activity"}}}""";
+const string attach = """{"protocolVersion":1,"hostIdentity":"host-a","hostInstanceId":"instance-a","capabilities":{"observations":{"version":1,"sessions":"/api/sessions?view=observation","attention":"/api/attention","activity":"/api/activity","identity":true,"dismissals":{"version":1,"action":"presentation.dismiss"}}}}""";
 const string ready = """{"revision":7,"status":"ready","nextCursor":null,"executionCount":1,"preparingCount":0,"loadingCount":0,"attentionCount":0,"requiresActionCount":0}""";
-const string session = """{"id":"chat-a","title":"Test chat","status":"working","pinned":false,"agentCreated":false,"activity":{"execution":true,"preparing":false,"loading":false}}""";
+const string session = """{"id":"chat-a","title":"Test chat","status":"working","pinned":false,"agentCreated":false,"dismissal":{"id":"activity-a","fingerprint":"work-one","dismissed":false},"activity":{"execution":true,"preparing":false,"loading":false}}""";
 string Page(string items = "", string cursor = "null", int revision = 1) => $"{{\"revision\":{revision},\"items\":[{items}],\"nextCursor\":{cursor}}}";
 async Task Check(string name, Func<Task> run) { await run();passed++;Console.WriteLine("PASS " + name); }
 void Assert(bool value) { if (!value) throw new Exception("Assertion failed."); }
 async Task Reject(Func<Task> work) { try { await work(); } catch (Exception e) when (e is not TestFailure) { return; } throw new TestFailure("Expected rejection."); }
-HttpResponseMessage Response(string json, int code = 200) => new((HttpStatusCode)code) { Content = new StringContent(json, Encoding.UTF8, "application/json") };
+HttpResponseMessage Response(string json, int code = 200) {
+    var body = System.Text.Json.Nodes.JsonNode.Parse(json)!.AsObject();
+    if (body.ContainsKey("revision")) { body.TryAdd("hostIdentity", "host-a"); body.TryAdd("hostInstanceId", "instance-a"); }
+    return new((HttpStatusCode)code) { Content = new StringContent(body.ToJsonString(), Encoding.UTF8, "application/json") };
+}
 HostTransport Transport(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> handle) => new(endpoint, handler: new Handler(handle));
 HostTransport Queue(params string[] bodies) { var q = new Queue<string>(bodies);return Transport((_, _) => Task.FromResult(Response(q.Dequeue()))); }
 
@@ -179,64 +183,74 @@ await Check("attention reaction settles back to ongoing animation without replay
     playback.Update(true,false,1,[row],5);Assert(playback.Presentation(5).State==AvatarState.Working);return Task.CompletedTask;
 });
 
-string Compatibility(string sessions, string notices, string sessionsCursor = "null", string itemsCursor = "null", string identity = "host-a", int protocol = 1)
-    => JsonSerializer.Serialize(new { protocolVersion = protocol, hostIdentity = identity, hostInstanceId = "instance-a",
-        sessions = JsonSerializer.Deserialize<JsonElement>("[" + sessions + "]"), items = JsonSerializer.Deserialize<JsonElement>("[" + notices + "]"),
-        sessionsNextCursor = JsonSerializer.Deserialize<string?>(sessionsCursor), itemsNextCursor = JsonSerializer.Deserialize<string?>(itemsCursor),
-        sessionsTruncated = sessionsCursor != "null", itemsTruncated = itemsCursor != "null" });
-
-HostTransport Restricted(Func<HttpRequestMessage,CancellationToken,Task<HttpResponseMessage>> handle) => new(endpoint,"amc_"+new string('0',32)+"."+new string('a',64),handler:new Handler(handle));
-await Check("restricted scope 403 admits only verified read compatibility", async () => {
-    var paths=new List<string>();
-    using var transport=Restricted((req,_)=>{
-        paths.Add(req.RequestUri!.PathAndQuery);
-        return Task.FromResult(req.RequestUri.AbsolutePath switch {
-            "/api/clients/attach"=>Response(attach), "/api/sessions"=>Response("{}",403),
-            "/api/companion"=>Response(Compatibility(session,"")), "/api/activity"=>Response(ready),
-            _=>throw new TestFailure("Unexpected route") });
-    });
-    var client=new ObservationClient(transport);await client.AttachAsync(null,default);var result=await client.PollAsync(default);
-    Assert(result.Sessions.Single().Id=="chat-a" && result.Activity.ExecutionCount==1);
-    await client.PollAsync(default);Assert(paths.Count(p=>p.StartsWith("/api/sessions"))==1);
-});
-await Check("401 never falls back and unscoped 403 never falls back", async () => {
-    foreach(var status in new[]{401,403}){
-        int reads=0;var handler=new Handler((req,_)=>Task.FromResult(req.RequestUri!.AbsolutePath=="/api/clients/attach"?Response(attach):(++reads==1?Response("{}",status):throw new TestFailure("Unexpected fallback"))));
-        using var transport=new HostTransport(endpoint,status==401?"amc_"+new string('0',32)+"."+new string('a',64):null,handler:handler);
-        var client=new ObservationClient(transport);await client.AttachAsync(null,default);await Reject(()=>client.PollAsync(default));Assert(reads==1);
+await Check("restricted and anonymous denials never use a legacy feed", async () => {
+    foreach (var restricted in new[] { false, true }) foreach(var status in new[]{401,403,404,503}) {
+        var paths = new List<string>();
+        using var transport = new HostTransport(endpoint, restricted ? "amc_" + new string('0',32) + "." + new string('a',64) : null,
+            handler: new Handler((req,_) => {
+                paths.Add(req.RequestUri!.AbsolutePath);
+                return Task.FromResult(req.RequestUri.AbsolutePath == "/api/clients/attach" ? Response(attach) : Response("{}", status));
+            }));
+        var client=new ObservationClient(transport); await client.AttachAsync(null,default);
+        await Reject(()=>client.PollAsync(default));
+        Assert(paths.SequenceEqual(new[]{"/api/clients/attach", "/api/sessions"}));
     }
 });
-await Check("compatibility rejects changed host and unsupported version", async () => {
-    foreach(var value in new[]{Compatibility("","",identity:"other"),Compatibility("","",protocol:2)}){
-        using var transport=Restricted((req,_)=>Task.FromResult(req.RequestUri!.AbsolutePath switch {"/api/clients/attach"=>Response(attach),"/api/sessions"=>Response("{}",403),_=>Response(value)}));
-        var client=new ObservationClient(transport);await client.AttachAsync(null,default);await Reject(()=>client.PollAsync(default));
-    }
+await Check("duplicate generic IDs cannot publish a baseline", async () => {
+    using var transport = Queue(attach, Page(session, cursor:"\"next\""), Page(session));
+    var client = new ObservationClient(transport); await client.AttachAsync(null, default);
+    await Reject(()=>client.PollAsync(default));
 });
-await Check("compatibility retains terminal-side cursor and does not duplicate rows", async () => {
-    var notice="""{"id":"notice-a","fingerprint":"f","kind":"session","target":{"type":"session","sessionId":"chat-a"},"requiresAction":true,"read":false,"title":"Error","summary":"Review","agentCreated":false}""";
-    var pages=new Queue<string>([Compatibility("","","\"s1\"","\"n1\""),Compatibility(session,"",itemsCursor:"\"n2\""),Compatibility(session,notice)]);
-    int companion=0;
-    using var transport=Restricted((req,_)=>{
-        if(req.RequestUri!.AbsolutePath=="/api/companion"){
-            companion++;if(companion==3)Assert(req.RequestUri.Query.Contains("sessionsCursor=s1")&&req.RequestUri.Query.Contains("itemsCursor=n2"));
-            return Task.FromResult(Response(pages.Dequeue()));
-        }
-        return Task.FromResult(req.RequestUri.AbsolutePath switch {"/api/clients/attach"=>Response(attach),"/api/sessions"=>Response("{}",403),"/api/activity"=>Response(ready),_=>throw new TestFailure("Unexpected route")});
+await Check("dismissal retries retain exact command and never fall back after denial", async () => {
+    var intent = new DismissalIntent("stable-command", registration.Id, endpoint.ToString(), "host-a", "update", "state");
+    var writes = 0;
+    using var transport = Transport(async (req, ct) => {
+        if (req.RequestUri!.AbsolutePath == "/api/clients/attach") return Response(attach);
+        Assert(req.RequestUri.AbsolutePath == "/api/actions"); writes++;
+        var body = JsonDocument.Parse(await req.Content!.ReadAsStringAsync(ct)).RootElement;
+        Assert(body.GetProperty("id").GetString() == intent.RequestId);
+        Assert(body.GetProperty("action").GetString() == "presentation.dismiss");
+        var item = body.GetProperty("args").GetProperty("items")[0];
+        Assert(item.GetProperty("id").GetString() == "update" && item.GetProperty("fingerprint").GetString() == "state");
+        return Response(writes == 1 ? "{}" : "{\"accepted\":true}", writes == 1 ? 503 : 200);
     });
-    var client=new ObservationClient(transport);await client.AttachAsync(null,default);var result=await client.PollAsync(default);
-    Assert(result.Sessions.Count==1&&result.Notices.Single().Kind=="session-error"&&companion==3);
+    var client = new ObservationClient(transport);
+    await Reject(() => client.DismissAsync(intent, default)); Assert(writes == 1);
+    await client.DismissAsync(intent, default); Assert(writes == 2);
+    await Reject(() => client.DismissAsync(intent with { HostIdentity = "other" }, default)); Assert(writes == 2);
 });
-await Check("compatibility completes pending counts before retrying observation", async () => {
-    int companion=0,counts=0;
-    using var transport=Restricted((req,_)=>Task.FromResult(req.RequestUri!.AbsolutePath switch {
-        "/api/clients/attach"=>Response(attach),"/api/sessions"=>Response("{}",403),
-        "/api/companion"=>++companion==1?Response("{}",503):Response(Compatibility("","")),
-        "/api/activity"=>++counts==1?Response("""{"revision":7,"status":"collecting","nextCursor":"finish"}""",202):Response(ready),
-        _=>throw new TestFailure("Unexpected route")}));
-    var client=new ObservationClient(transport);await client.AttachAsync(null,default);await client.PollAsync(default);Assert(companion==2&&counts==3);
+await Check("service restart abandons old pages and rediscovery pins fresh identity", async () => {
+    using var transport = Queue(attach, Page(session, cursor:"\"next\""),
+        Page().Replace("\"revision\":1", "\"hostInstanceId\":\"instance-b\",\"revision\":1"),
+        attach.Replace("instance-a", "instance-b"),
+        Page().Replace("\"revision\":1", "\"hostInstanceId\":\"instance-b\",\"revision\":1"),
+        Page().Replace("\"revision\":1", "\"hostInstanceId\":\"instance-b\",\"revision\":1"),
+        ready.Replace("\"revision\":7", "\"hostInstanceId\":\"instance-b\",\"revision\":7"));
+    var client = new ObservationClient(transport); await client.AttachAsync(null, default);
+    var value = await client.PollAsync(default); Assert(value.HostInstanceId == "instance-b" && value.Sessions.Count == 0);
 });
 var temp=Path.Combine(Path.GetTempPath(),"amplifier-core-tests-"+Guid.NewGuid().ToString("N"));Directory.CreateDirectory(temp);
 try {
+    await Check("shared dismissal intent survives restart and is exact-state and service scoped", () => {
+        var path = Path.Combine(temp, "dismissals.json");
+        var state = new DismissalDescriptor("update", "one", false);
+        var store = new SharedDismissals(path); var first = store.Save(registration, state);
+        Assert(store.Save(registration, state).RequestId == first.RequestId);
+        store = new SharedDismissals(path);
+        Assert(store.Hidden(registration, state));
+        Assert(!store.Hidden(registration, state with { Fingerprint = "two" }));
+        var other = registration with { Id = "other", Address = "https://other.example" };
+        Assert(!store.Hidden(other, state));
+        var second = store.Save(other, state);
+        store.Accepted(first.RequestId);
+        Assert(store.Entries.Single(x=>x.RequestId==first.RequestId).Accepted);
+        store.Reconcile(registration, [state]); Assert(store.Hidden(registration, state));
+        store.Reconcile(registration, [state with { Dismissed = true }]);
+        Assert(store.Entries.Single().RequestId == second.RequestId);
+        Assert(store.Hidden(registration, state with { Dismissed = true }));
+        store.Reconcile(other, [state with { Fingerprint = "two" }]); Assert(store.Entries.Count == 0);
+        return Task.CompletedTask;
+    });
     await Check("saved intent survives uncertain delivery; explicit retry preserves ID", async () => {
         var outbox=new Outbox(Path.Combine(temp,"outbox.json"));var reply=outbox.Save(registration,"chat-a","Hello");
         using var lost=Transport((req,_) => req.RequestUri!.AbsolutePath=="/api/clients/attach" ? Task.FromResult(Response(attach)) : throw new HttpRequestException("Lost response"));

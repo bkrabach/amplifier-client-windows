@@ -17,6 +17,7 @@ public sealed record NoticeRow(string Key, string RegistrationId, string HostIde
     // Action-required items share one tier, preserving the host's order within it.
     public int Priority => State switch { AvatarState.Error or AvatarState.Review => 0, _ => 1 };
     public bool Attention { get; init; } = true;
+    public DismissalDescriptor? Dismissal { get; init; }
     public int SortPriority => Attention ? Priority : 2;
 }
 
@@ -47,15 +48,15 @@ public static partial class Presentation
                 session is { } s && (s.Execution || s.Preparing) ? AvatarState.Working : AvatarState.Ready;
             result.Add(new(service.Id + ":" + observation.HostIdentity + ":" + notice.Id, service.Id,
                 observation.HostIdentity, notice.Target.SessionId, Plain(notice.Title), state == AvatarState.Working ? "Unread · Thinking…" : Plain(notice.Summary),
-                notice.Fingerprint, state, service.Label));
+                notice.Fingerprint, state, service.Label) { Dismissal = notice.Dismissal });
         }
         var noticed = result.Select(x => x.SessionId).ToHashSet();
         if (includeWorking)
             foreach (var session in observation.Sessions.Where(s => !noticed.Contains(s.Id) && (s.Execution || s.Preparing) && (s.AgentCreated != true || s.Pinned)))
                 result.Add(new(service.Id + ":" + observation.HostIdentity + ":work:" + session.Id,
                     service.Id, observation.HostIdentity, session.Id, Plain(session.Title),
-                    "Thinking…",
-                    "work|" + session.Status + "|", AvatarState.Working, service.Label) { Attention = false });
+                    Plain(session.Display?.Summary ?? "Thinking…"),
+                    session.Dismissal?.Fingerprint ?? "work|" + session.Status + "|", AvatarState.Working, service.Label) { Attention = false, Dismissal = session.Dismissal });
         return result;
     }
 

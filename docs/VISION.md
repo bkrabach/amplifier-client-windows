@@ -11,7 +11,7 @@ trusted-origin native bridge. There is no second agent runtime in this client.
 
 Start with the Mac client's established multi-service and companion experience:
 six avatars, clear/dark artwork, semantic activity indications, canonical attention,
-optional service grouping, stable scroll/resize anchoring, local dismissal, and
+optional service grouping, stable scroll/resize anchoring, shared dismissal, and
 visible/hidden/hover notices. Reuse approved artwork; use Windows controls,
 credentials, accessibility, notification and installation mechanisms.
 
@@ -29,8 +29,14 @@ Signed installation, update recovery, real Windows focus and accessibility, and
 host compatibility require their own evidence. Mac acceptance is inspiration and
 source provenance, not Windows qualification. Public release waits for those gates.
 
-Compatibility decision, November 16: current services must remain usable with
-restricted browser-approved chat credentials. A bounded, identity-checked adapter
-may bridge the shipped companion feed until the host grants the already-advertised
-generic reads to that scope. Generic observations remain the target; neither a
-full-control credential nor a server upgrade is a prerequisite for this pilot.
+## Shared observation and dismissal direction (2026-11-16)
+
+User-approved direction: consume one generalized, permission-aware observation
+contract and retire the temporary companion adapter after coordinated cutover.
+Dismissal belongs to the owning account on each service and is shared across its
+approved clients. Dismissing an observed update hides that exact state everywhere;
+a subsequent response or activity incarnation can appear again. Dismissal does
+not acknowledge unread content, answer questions, approve work or stop execution.
+Display preferences (avatar, size, grouping, visibility and placement) remain local.
+Independent services remain independent authorities; this is not account federation.
+Implementation, qualification and deployed cutover are tracked separately.
