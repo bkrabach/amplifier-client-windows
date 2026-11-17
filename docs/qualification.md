@@ -28,11 +28,12 @@ contains a browser/desktop task executor or host credentials in navigation.
 ## Implemented and source-tested
 
 - HTTPS origin restrictions and scoped attach/observation discovery.
-- Versioned compatibility reads for the shipped restricted companion scope after
-  an exact generic-session 403; no fallback on revoked credentials or wider scope.
+- Generic observation-only reads using existing restricted paired credentials;
+  explicit identity and shared-dismissal discovery, with no companion-feed fallback.
 - Sequential bounded pagination, empty continuation pages, count completion,
   coherent revisions, cursor recovery, authentication failure and response bounds.
-- Per-service isolation, explicit global/grouped ordering and local dismissal.
+- Per-service isolation, explicit global/grouped ordering and shared exact-state
+  dismissal receipts. Appearance and layout preferences remain local.
 - Saved replies before submission, immutable retry identity/target, uncertain
   delivery retention and no startup/reconnect replay.
 - Hover grace/drag hold, anchored viewport limits and semantic animation playback.
@@ -49,8 +50,7 @@ contains a browser/desktop task executor or host credentials in navigation.
   handoff; no claim that opening a URL reuses an existing PWA window.
 - Composer new-chat creation and durable editable drafts; current composer targets
   existing observed chats and saves send intent before delivery.
-- Detailed tool-action labels if the canonical host observation surface supports
-  them. V1 currently exposes activity flags and bounded attention summaries only.
+- Broader tool-action coverage beyond bounded host-provided display summaries.
 - Stable application/notification identity, opt-in startup, signed installer and
   signed update delivery, including exact-artifact clean install/upgrade/uninstall.
 - Windows signing/publisher identity and protected publication workflow. No Mac
@@ -75,3 +75,10 @@ acceptance matrix. Other origins without an installed PWA retain browser fallbac
 
 The Mac context-menu equivalent is independently qualified and released by its
 canonical repository; no Windows result is represented as Mac acceptance.
+
+## Shared observations preview
+
+The generic-only transport passed bidirectional dismissal, host restart and new-state
+checks against an isolated real service using separate Mac and Windows credentials.
+Existing credentials remain valid on Unified 0.103.0; unsupported hosts require an
+update. These are transport checks, not signed installer qualification.
