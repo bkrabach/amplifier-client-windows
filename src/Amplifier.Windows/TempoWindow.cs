@@ -88,7 +88,7 @@ internal sealed class TempoWindow : Window, IDisposable
             AvatarState.Working => Color.FromRgb(0, 170, 170), AvatarState.Offline or AvatarState.Connecting => Color.FromRgb(205, 145, 55), _ => Colors.Gray
         });
         AutomationProperties.SetName(avatar, owner.Preferences.Shape + ", " + state);
-        AutomationProperties.SetName(pill, state + ". Show or hide updates");pill.ToolTip = state + " · " + owner.Attention + " updates";
+        AutomationProperties.SetName(pill, state + ". Show or hide updates");pill.ToolTip = state + " · " + owner.BubbleCountLabel;
         notices.UpdateRows();Tick();
     }
     private void Tick()
@@ -186,7 +186,7 @@ internal sealed class NoticeWindow : Window
         headerRow.Height = new GridLength(30 * Scale);heading.FontSize = 14 * Scale;
         scaledContent.LayoutTransform = new ScaleTransform(Scale, Scale);
         Left = Math.Clamp(right - Width, area.Left, Math.Max(area.Left, area.Right - Width));Top = anchor - Height - 8;
-        heading.Text = owner.Attention + (owner.Attention == 1 ? " chat · " : " chats · ") + (owner.Preferences.Expanded ? "⌃ Collapse" : "⌄ Expand");
+        heading.Text = owner.BubbleCountLabel + " · " + (owner.Preferences.Expanded ? "⌃ Collapse" : "⌄ Expand");
         Fade();
     }
     public void UpdateRows()
@@ -196,7 +196,7 @@ internal sealed class NoticeWindow : Window
         var offset = scroll.VerticalOffset;
         var anchor = cards.Children.OfType<Border>().LastOrDefault(x => x.TranslatePoint(new Point(), cards).Y <= offset / renderedScale)
             ?? cards.Children.OfType<Border>().FirstOrDefault();
-        var anchorKey = anchor?.Tag as string;
+        var anchorKey = anchor?.Tag;
         var anchorDelta = anchor == null ? 0 : offset / renderedScale - anchor.TranslatePoint(new Point(), cards).Y;
         renderedScale = Scale;cards.Children.Clear();string? previousService = null;
         foreach (var row in owner.Preferences.Expanded ? owner.Rows : owner.Rows.Take(1))
@@ -212,7 +212,7 @@ internal sealed class NoticeWindow : Window
             AutomationProperties.SetName(open, row.Title + ", " + row.Detail + ". Open chat");open.Click += (_, _) => owner.OpenChat(row);Grid.SetColumn(open, 1);body.Children.Add(open);
             var close = new Button { Content = "×", Foreground = Brushes.LightGray, Background = Brushes.Transparent, BorderThickness = new Thickness(0), Padding = new Thickness(0), FontSize = 20 };
             close.ToolTip = row.State == AvatarState.Working ? "Hide on all devices until activity changes" : "Hide on all devices; keep unread";AutomationProperties.SetName(close, "Dismiss " + row.Title);close.Click += (_, _) => owner.Dismiss(row);Grid.SetColumn(close, 2);body.Children.Add(close);
-            cards.Children.Add(new Border { Tag = row.Key, Height = 58, Margin = new Thickness(0, 4, 0, 4), Background = new SolidColorBrush(Color.FromArgb(238, 38, 44, 52)), CornerRadius = new CornerRadius(27), Child = body });
+            cards.Children.Add(new Border { Tag = (row.RegistrationId, row.HostIdentity, row.SessionId), Height = 58, Margin = new Thickness(0, 4, 0, 4), Background = new SolidColorBrush(Color.FromArgb(238, 38, 44, 52)), CornerRadius = new CornerRadius(27), Child = body });
         }
         Dispatcher.BeginInvoke(() =>
         {

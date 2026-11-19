@@ -44,7 +44,7 @@ internal sealed class ClientController : IDisposable
     public IReadOnlyList<NoticeRow> Rows { get; private set; } = [];
     public IReadOnlyList<NoticeRow> AllRows { get; private set; } = [];
     public IReadOnlyList<ServiceRuntime> Services => Preferences.Services.Select(x => services.GetValueOrDefault(x.Id)).Where(x => x != null).Cast<ServiceRuntime>().ToArray();
-    public int Attention => Rows.Count;
+    public string BubbleCountLabel => Rows.Count + (Rows.Count == 1 ? " chat" : " chats");
     public int Working => Services.Where(x => x.Observation != null).Sum(x => x.Observation!.Sessions.Count(s => (s.Execution || s.Preparing) && (s.AgentCreated != true || s.Pinned)));
     public bool Connected => Services.Any(x => x.Observation != null);
     public bool Connecting => Services.Any(x => x.Status == "Connecting…");
@@ -239,7 +239,7 @@ internal sealed class ClientController : IDisposable
         AllRows = Services.Where(x => x.Observation != null).SelectMany(x => Presentation.Rows(x.Registration, x.Observation!, Preferences.IncludeWorking).Select(row => x.Details.Enrich(row, x.Observation!))).ToArray();
         Rows = Presentation.Sort(Presentation.ChatRows(AllRows.Where(x => Preview ? !Presentation.Dismissed(x, Preferences.Dismissed) : x.Dismissal == null || !dismissals.Hidden(services[x.RegistrationId].Registration, x.Dismissal))), Preferences.Services.Select(x => x.Id).ToArray(), Preferences.GroupByService);
         var menu = new Forms.ContextMenuStrip();
-        menu.Items.Add(Connected ? Attention + " updates · " + Working + " working" : "No services connected").Enabled = false;
+        menu.Items.Add(Connected ? BubbleCountLabel + " · " + Working + " working" : "No services connected").Enabled = false;
         menu.Items.Add("Open Amplifier", null, (_, _) => OpenDefault());
         menu.Items.Add("New message…", null, (_, _) => Compose()).Enabled = !Preview;
         var serviceMenu = new Forms.ToolStripMenuItem("Services");
@@ -250,7 +250,7 @@ internal sealed class ClientController : IDisposable
         menu.Items.Add("Settings…", null, (_, _) => OpenSettings());
         menu.Items.Add("Quit Amplifier", null, (_, _) => Application.Current.Shutdown());
         var previous = tray.ContextMenuStrip;tray.ContextMenuStrip = menu;previous?.Dispose();
-        tray.Text = Preview ? "Amplifier preview · synthetic activity" : Connected ? "Amplifier · " + Attention + " updates · " + Working + " working" : "Amplifier · disconnected";
+        tray.Text = Preview ? "Amplifier preview · synthetic activity" : Connected ? "Amplifier · " + BubbleCountLabel + " · " + Working + " working" : "Amplifier · disconnected";
         tempo.Refresh();Changed?.Invoke();
     }
     public void Dispose()
