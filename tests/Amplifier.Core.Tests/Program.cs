@@ -103,10 +103,24 @@ await Check("Mac parity: stable host ties, pinned inactive notices, one row per 
     var observation = new Observation("h","i",[working],[
         N("Zulu", "inactive", "completion",true,true), N("Alpha", "other", "completion"),
         N("Error", "failed", "session-error"), N("Active", "active", "completion")], new(1,0,0,4,1));
-    var rows = Presentation.Sort(Presentation.Rows(service,observation,true),[service.Id],false);
+    var rows = Presentation.Sort(Presentation.ChatRows(Presentation.Rows(service,observation,true)),[service.Id],false);
     Assert(rows.Count==4 && rows[0].Title=="Error" && rows[1].Title=="Zulu" && rows[2].Title=="Alpha");
     Assert(rows.Count(x=>x.SessionId=="active")==1 && rows.Last().State==AvatarState.Working && rows.Last().Attention);
     Assert(rows.Last().Detail=="Unread · Thinking…");return Task.CompletedTask;
+});
+await Check("one visible chat per service, with sidebar status and exact dismissal states", () => {
+    var completion = new DismissalDescriptor("completion:s", "reply", false);
+    var error = new DismissalDescriptor("error:s", "error", false);
+    var status = new ChatStatus("attention", "Needs attention");
+    var ready = new NoticeRow("completion","first","host","s","Chat","Result","reply",AvatarState.Ready,"First")
+        { ChatStatus = status, Dismissal = completion, UnreadResponse = true };
+    var failure = ready with { Key = "error", State = AvatarState.Error, Dismissal = error, UnreadResponse = false };
+    var other = ready with { RegistrationId = "second", ChatStatus = new("paused","Paused") };
+    var rows = Presentation.ChatRows([ready, failure, other]).ToArray();
+    Assert(rows.Length == 2 && rows[0].Detail == "Needs attention · Unread response");
+    Assert(rows[0].VisibleStates.SequenceEqual(new[] { completion, error }));
+    Assert(rows[1].Detail == "Paused · Unread response");
+    return Task.CompletedTask;
 });
 await Check("notice size defaults to compact and never exceeds original size", () => {
     var preferences=JsonSerializer.Deserialize<Preferences>("{}",Json.Options)!;

@@ -44,7 +44,7 @@ internal sealed class ClientController : IDisposable
     public IReadOnlyList<NoticeRow> Rows { get; private set; } = [];
     public IReadOnlyList<NoticeRow> AllRows { get; private set; } = [];
     public IReadOnlyList<ServiceRuntime> Services => Preferences.Services.Select(x => services.GetValueOrDefault(x.Id)).Where(x => x != null).Cast<ServiceRuntime>().ToArray();
-    public int Attention => AllRows.Count(x => x.Attention);
+    public int Attention => Rows.Count;
     public int Working => Services.Where(x => x.Observation != null).Sum(x => x.Observation!.Sessions.Count(s => (s.Execution || s.Preparing) && (s.AgentCreated != true || s.Pinned)));
     public bool Connected => Services.Any(x => x.Observation != null);
     public bool Connecting => Services.Any(x => x.Status == "Connecting…");
@@ -115,7 +115,7 @@ internal sealed class ClientController : IDisposable
     {
         if (Preview) { Preferences.Dismissed[row.Key] = row.Fingerprint; Refresh(); return; }
         if (!services.TryGetValue(row.RegistrationId, out var runtime) || runtime.Registration.HostIdentity != row.HostIdentity || row.Dismissal == null) return;
-        try { dismissals.Save(runtime.Registration, row.Dismissal); Refresh(); _ = SyncDismissalsAsync(runtime); }
+        try { dismissals.SaveAll(runtime.Registration, row.VisibleStates); Refresh(); _ = SyncDismissalsAsync(runtime); }
         catch (Exception) { runtime.DismissalStatus = "Couldn't save dismissal — try again"; Changed?.Invoke(); }
     }
     private static DismissalDescriptor[] Descriptors(Observation snapshot) => snapshot.Notices.Select(x => x.Dismissal)
@@ -237,7 +237,7 @@ internal sealed class ClientController : IDisposable
     {
         if (disposed) return;
         AllRows = Services.Where(x => x.Observation != null).SelectMany(x => Presentation.Rows(x.Registration, x.Observation!, Preferences.IncludeWorking).Select(row => x.Details.Enrich(row, x.Observation!))).ToArray();
-        Rows = Presentation.Sort(AllRows.Where(x => Preview ? !Presentation.Dismissed(x, Preferences.Dismissed) : x.Dismissal == null || !dismissals.Hidden(services[x.RegistrationId].Registration, x.Dismissal)), Preferences.Services.Select(x => x.Id).ToArray(), Preferences.GroupByService);
+        Rows = Presentation.Sort(Presentation.ChatRows(AllRows.Where(x => Preview ? !Presentation.Dismissed(x, Preferences.Dismissed) : x.Dismissal == null || !dismissals.Hidden(services[x.RegistrationId].Registration, x.Dismissal))), Preferences.Services.Select(x => x.Id).ToArray(), Preferences.GroupByService);
         var menu = new Forms.ContextMenuStrip();
         menu.Items.Add(Connected ? Attention + " updates · " + Working + " working" : "No services connected").Enabled = false;
         menu.Items.Add("Open Amplifier", null, (_, _) => OpenDefault());

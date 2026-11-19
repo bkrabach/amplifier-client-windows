@@ -18,6 +18,9 @@ public sealed record NoticeRow(string Key, string RegistrationId, string HostIde
     public int Priority => State switch { AvatarState.Error or AvatarState.Review => 0, _ => 1 };
     public bool Attention { get; init; } = true;
     public DismissalDescriptor? Dismissal { get; init; }
+    public ChatStatus? ChatStatus { get; init; }
+    public IReadOnlyList<DismissalDescriptor> VisibleStates { get; init; } = [];
+    public bool UnreadResponse { get; init; }
     public int SortPriority => Attention ? Priority : 2;
 }
 
@@ -48,16 +51,47 @@ public static partial class Presentation
                 session is { } s && (s.Execution || s.Preparing) ? AvatarState.Working : AvatarState.Ready;
             result.Add(new(service.Id + ":" + observation.HostIdentity + ":" + notice.Id, service.Id,
                 observation.HostIdentity, notice.Target.SessionId, Plain(notice.Title), state == AvatarState.Working ? "Unread · Thinking…" : Plain(notice.Summary),
-                notice.Fingerprint, state, service.Label) { Dismissal = notice.Dismissal });
+                notice.Fingerprint, state, service.Label) { Dismissal = notice.Dismissal, ChatStatus = notice.ChatStatus ?? session?.ChatStatus, UnreadResponse = notice.Kind is "completion" or "manual-unread" });
         }
-        var noticed = result.Select(x => x.SessionId).ToHashSet();
         if (includeWorking)
-            foreach (var session in observation.Sessions.Where(s => !noticed.Contains(s.Id) && (s.Execution || s.Preparing) && (s.AgentCreated != true || s.Pinned)))
+            foreach (var session in observation.Sessions.Where(s => (s.Execution || s.Preparing) && (s.AgentCreated != true || s.Pinned)))
                 result.Add(new(service.Id + ":" + observation.HostIdentity + ":work:" + session.Id,
                     service.Id, observation.HostIdentity, session.Id, Plain(session.Title),
                     Plain(session.Display?.Summary ?? "Thinking…"),
-                    session.Dismissal?.Fingerprint ?? "work|" + session.Status + "|", AvatarState.Working, service.Label) { Attention = false, Dismissal = session.Dismissal });
+                    session.Dismissal?.Fingerprint ?? "work|" + session.Status + "|", AvatarState.Working, service.Label) { Attention = false, Dismissal = session.Dismissal, ChatStatus = session.ChatStatus });
         return result;
+    }
+
+    public static IEnumerable<NoticeRow> ChatRows(IEnumerable<NoticeRow> visible)
+    {
+        foreach (var group in visible.GroupBy(row => (row.RegistrationId, row.HostIdentity, row.SessionId)))
+        {
+            var primary = group.OrderBy(row => row.SortPriority).First();
+            var status = primary.ChatStatus;
+            var state = status?.Kind switch
+            {
+                "working" => AvatarState.Working,
+                "unread" => AvatarState.Ready,
+                "attention" when status.Label is "Approval requested" or "Answer requested" or "Dependency decision requested" => AvatarState.Review,
+                "attention" => AvatarState.Error,
+                "waiting" or "paused" or "idle" => AvatarState.Idle,
+                _ => primary.State
+            };
+            var detail = primary.Detail;
+            var unread = group.Any(row => row.UnreadResponse);
+            if (status?.Kind == "working")
+            {
+                var work = group.FirstOrDefault(row => !row.Attention);
+                if (work != null || primary.State != AvatarState.Working)
+                    detail = (unread ? "Unread · " : "") + (work?.Detail ?? "Thinking…");
+            }
+            if (status != null && status.Kind is not ("working" or "unread"))
+                detail = status.Label + (unread ? " · Unread response" : "");
+            yield return primary with {
+                State = state, Detail = detail,
+                VisibleStates = group.Select(row => row.Dismissal).OfType<DismissalDescriptor>().Distinct().ToArray()
+            };
+        }
     }
 
     public static bool Dismissed(NoticeRow row, IDictionary<string,string> saved)
