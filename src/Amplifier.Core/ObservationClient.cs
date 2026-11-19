@@ -4,6 +4,7 @@ namespace Amplifier.Core;
 
 public sealed class ObservationClient(HostTransport transport)
 {
+    private bool supportsChatStatus;
     private string? hostIdentity, instanceId;
     private readonly Dictionary<string, string> resources = [];
     private readonly SemaphoreSlim gate = new(1, 1);
@@ -34,6 +35,7 @@ public sealed class ObservationClient(HostTransport transport)
             if (resource != expected) throw new InvalidDataException("Unsupported observation resource.");
             resources[name] = resource;
         }
+        supportsChatStatus = observations.TryGetProperty("chatStatus", out var status) && status.ValueKind == JsonValueKind.True;
         hostIdentity = identity;
         instanceId = result.RequiredText("hostInstanceId");
         return identity;
@@ -82,6 +84,7 @@ public sealed class ObservationClient(HostTransport transport)
         var path = resources[name];
         path += path.Contains('?') ? "&scope=roots" : "?scope=roots";
         if (name != "activity") path += "&limit=200";
+        if (name != "activity" && supportsChatStatus) path += "&chatStatus=1";
         if (name == "sessions") path += "&activity=active-or-pinned";
         if (cursor != null) path += "&cursor=" + Uri.EscapeDataString(cursor);
         return path;

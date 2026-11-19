@@ -88,7 +88,7 @@ internal sealed class TempoWindow : Window, IDisposable
             AvatarState.Working => Color.FromRgb(0, 170, 170), AvatarState.Offline or AvatarState.Connecting => Color.FromRgb(205, 145, 55), _ => Colors.Gray
         });
         AutomationProperties.SetName(avatar, owner.Preferences.Shape + ", " + state);
-        AutomationProperties.SetName(pill, state + ". Show or hide updates");pill.ToolTip = state + " · " + owner.Attention + " updates";
+        AutomationProperties.SetName(pill, state + ". Show or hide updates");pill.ToolTip = state + " · " + owner.BubbleCountLabel;
         notices.UpdateRows();Tick();
     }
     private void Tick()
@@ -186,17 +186,17 @@ internal sealed class NoticeWindow : Window
         headerRow.Height = new GridLength(30 * Scale);heading.FontSize = 14 * Scale;
         scaledContent.LayoutTransform = new ScaleTransform(Scale, Scale);
         Left = Math.Clamp(right - Width, area.Left, Math.Max(area.Left, area.Right - Width));Top = anchor - Height - 8;
-        heading.Text = owner.Attention + " updates · " + (owner.Preferences.Expanded ? "⌃ Collapse" : "⌄ Expand");
+        heading.Text = owner.BubbleCountLabel + " · " + (owner.Preferences.Expanded ? "⌃ Collapse" : "⌄ Expand");
         Fade();
     }
     public void UpdateRows()
     {
-        var key = owner.Preferences.NoticeSize + ":" + owner.Preferences.Expanded + ":" + owner.Preferences.GroupByService + ":" + owner.Preferences.ServiceHeadings + ":" + string.Join("|", owner.Rows.Select(x => x.Key + x.Fingerprint + x.Title + x.State + x.Detail + x.ServiceName));
+        var key = owner.Preferences.NoticeSize + ":" + owner.Preferences.Expanded + ":" + owner.Preferences.GroupByService + ":" + owner.Preferences.ServiceHeadings + ":" + string.Join("|", owner.Rows.Select(x => x.Key + x.Fingerprint + x.Title + x.State + x.Detail + x.ServiceName + x.ChatStatus + string.Join(",", x.VisibleStates.Select(d => d.Id + ":" + d.Fingerprint))));
         if (key == rendered) return;rendered = key;
         var offset = scroll.VerticalOffset;
         var anchor = cards.Children.OfType<Border>().LastOrDefault(x => x.TranslatePoint(new Point(), cards).Y <= offset / renderedScale)
             ?? cards.Children.OfType<Border>().FirstOrDefault();
-        var anchorKey = anchor?.Tag as string;
+        var anchorKey = anchor?.Tag;
         var anchorDelta = anchor == null ? 0 : offset / renderedScale - anchor.TranslatePoint(new Point(), cards).Y;
         renderedScale = Scale;cards.Children.Clear();string? previousService = null;
         foreach (var row in owner.Preferences.Expanded ? owner.Rows : owner.Rows.Take(1))
@@ -205,14 +205,14 @@ internal sealed class NoticeWindow : Window
             { cards.Children.Add(new TextBlock { Text = row.ServiceName, Foreground = Brushes.LightGray, Height = 24, Margin = new Thickness(12, 0, 0, 0) });previousService = row.RegistrationId; }
             var body = new Grid { Margin = new Thickness(12, 7, 8, 7) };
             body.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(22) });body.ColumnDefinitions.Add(new ColumnDefinition());body.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(28) });
-            var icon = new TextBlock { Text = row.State switch { AvatarState.Working => "◌", AvatarState.Review => "?", AvatarState.Error => "!", _ => "●" }, Foreground = row.State == AvatarState.Error ? Brushes.OrangeRed : row.State == AvatarState.Review ? Brushes.Orange : Brushes.DeepSkyBlue, FontSize = 18, VerticalAlignment = VerticalAlignment.Center };body.Children.Add(icon);
+            var icon = new TextBlock { Text = row.ChatStatus?.Kind switch { "paused" => "Ⅱ", "waiting" => "◷", "idle" => "○", _ => row.State switch { AvatarState.Working => "◌", AvatarState.Review => "?", AvatarState.Error => "!", _ => "●" } }, Foreground = row.State == AvatarState.Error ? Brushes.OrangeRed : row.State == AvatarState.Review ? Brushes.Orange : Brushes.DeepSkyBlue, FontSize = 18, VerticalAlignment = VerticalAlignment.Center };body.Children.Add(icon);
             var text = new StackPanel();text.Children.Add(new TextBlock { Text = row.Title, Foreground = Brushes.White, FontWeight = FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis });
             text.Children.Add(new TextBlock { Text = (owner.Preferences.Services.Count > 1 ? row.ServiceName + " · " : "") + row.Detail, Foreground = Brushes.LightGray, TextTrimming = TextTrimming.CharacterEllipsis });
             var open = new Button { Content = text, Background = Brushes.Transparent, BorderThickness = new Thickness(0), Padding = new Thickness(0), HorizontalContentAlignment = HorizontalAlignment.Stretch };
             AutomationProperties.SetName(open, row.Title + ", " + row.Detail + ". Open chat");open.Click += (_, _) => owner.OpenChat(row);Grid.SetColumn(open, 1);body.Children.Add(open);
             var close = new Button { Content = "×", Foreground = Brushes.LightGray, Background = Brushes.Transparent, BorderThickness = new Thickness(0), Padding = new Thickness(0), FontSize = 20 };
             close.ToolTip = row.State == AvatarState.Working ? "Hide on all devices until activity changes" : "Hide on all devices; keep unread";AutomationProperties.SetName(close, "Dismiss " + row.Title);close.Click += (_, _) => owner.Dismiss(row);Grid.SetColumn(close, 2);body.Children.Add(close);
-            cards.Children.Add(new Border { Tag = row.Key, Height = 58, Margin = new Thickness(0, 4, 0, 4), Background = new SolidColorBrush(Color.FromArgb(238, 38, 44, 52)), CornerRadius = new CornerRadius(27), Child = body });
+            cards.Children.Add(new Border { Tag = (row.RegistrationId, row.HostIdentity, row.SessionId), Height = 58, Margin = new Thickness(0, 4, 0, 4), Background = new SolidColorBrush(Color.FromArgb(238, 38, 44, 52)), CornerRadius = new CornerRadius(27), Child = body });
         }
         Dispatcher.BeginInvoke(() =>
         {

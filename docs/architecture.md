@@ -73,3 +73,10 @@ for recovery. Appearance, geometry, hover/visibility, grouping and sound remain
 local; host pins are the shared opt-in for agent-created chats.
 
 Candidate shared wire owner: [presentation contract](https://github.com/microsoft/amplifier-unified/blob/e7bc197dd/docs/clients/presentation.md) at `e7bc197dd`, based on accepted `46f0fe683b6bf87914fcda170e0ef3f6bd26f67f`. Candidate qualification is separate from service release/adoption.
+
+Tempo requests the optional sidebar chat status from both generic observation
+collections when the service advertises it. It groups visible occurrences by
+service and session, keeps unread separate from the current status, and counts
+the resulting chat bubbles including working chats. Dismissing a bubble records
+the displayed occurrences' exact fingerprints. Earlier v1 hosts retain the
+existing notice-based status until their service is updated.

@@ -17,19 +17,28 @@ public sealed class SharedDismissals(string path)
         var next = values.ToList(); AtomicFile.Write(path, next); loaded = next;
     }
     public IReadOnlyList<DismissalIntent> Entries { get { lock (gate) return (loaded ??= AtomicFile.Read(path, () => new List<DismissalIntent>())).ToArray(); } }
-    public DismissalIntent Save(Registration service, DismissalDescriptor state)
+    public DismissalIntent Save(Registration service, DismissalDescriptor state) => SaveAll(service, [state]).Single();
+
+    public IReadOnlyList<DismissalIntent> SaveAll(Registration service, IReadOnlyList<DismissalDescriptor> states)
     {
-        if (service.HostIdentity == null || string.IsNullOrEmpty(state.Id) || string.IsNullOrEmpty(state.Fingerprint))
-            throw new InvalidOperationException("A current host-issued update is required.");
         lock (gate)
         {
             var entries = Entries.ToList();
-            var existing = entries.FirstOrDefault(x => Matches(x, service) && x.Id == state.Id && x.Fingerprint == state.Fingerprint);
-            if (existing != null) return existing;
-            if (entries.Count >= 512) throw new InvalidOperationException("Dismissal synchronization is full. Reconnect services before hiding more updates.");
-            var item = new DismissalIntent(Guid.NewGuid().ToString("N"), service.Id,
-                new Endpoint(service.Address).ToString(), service.HostIdentity, state.Id, state.Fingerprint);
-            entries.Add(item); Persist(entries); return item;
+            var saved = new List<DismissalIntent>();
+            foreach (var state in states)
+            {
+                if (service.HostIdentity == null || string.IsNullOrEmpty(state.Id) || string.IsNullOrEmpty(state.Fingerprint))
+                    throw new InvalidOperationException("A current host-issued update is required.");
+                var existing = entries.FirstOrDefault(x => Matches(x, service) && x.Id == state.Id && x.Fingerprint == state.Fingerprint);
+                if (existing != null) { saved.Add(existing); continue; }
+                var item = new DismissalIntent(Guid.NewGuid().ToString("N"), service.Id,
+                    new Endpoint(service.Address).ToString(), service.HostIdentity, state.Id, state.Fingerprint);
+                entries.Add(item);
+                saved.Add(item);
+            }
+            if (entries.Count > 512) throw new InvalidOperationException("Dismissal synchronization is full. Reconnect services before hiding more updates.");
+            if (entries.Count != Entries.Count) Persist(entries);
+            return saved;
         }
     }
     public static bool Matches(DismissalIntent item, Registration service) => item.RegistrationId == service.Id &&
